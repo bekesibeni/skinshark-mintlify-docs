@@ -1,0 +1,1550 @@
+{
+  "info": {
+    "_postman_id": "26d35016-f6ea-4554-86b4-a61bcefb90e1",
+    "name": "Skinshark partner API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "46253788",
+    "_collection_link": "https://go.postman.co/collection/46253788-26d35016-f6ea-4554-86b4-a61bcefb90e1?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "v1",
+      "item": [
+        {
+          "name": "market",
+          "item": [
+            {
+              "name": "listings",
+              "item": [
+                {
+                  "name": "listings",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/market/listings?item=9e6e6b94cd0b562b&page=1",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "market",
+                        "listings"
+                      ],
+                      "query": [
+                        {
+                          "key": "item",
+                          "value": "9e6e6b94cd0b562b",
+                          "description": "Skinshark itemid of a skin"
+                        },
+                        {
+                          "key": "page",
+                          "value": "1"
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "search",
+              "item": [
+                {
+                  "name": "search",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/market/search?q=ak-47&weapon=AK-47&item_type=skin&rarity=Covert&team=Terrorist&wear=Factory New&category=Rifles&tags=StatTrak&minPrice=10&maxPrice=1000&sort=popularity",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "market",
+                        "search"
+                      ],
+                      "query": [
+                        {
+                          "key": "q",
+                          "value": "ak-47",
+                          "description": "Query of the search input"
+                        },
+                        {
+                          "key": "weapon",
+                          "value": "AK-47",
+                          "description": "AK-47, AUG, AWP, Bayonet, Bloodhound Gloves, Bowie Knife, Broken Fang Gloves, Butterfly Knife, CZ75-Auto, Classic Knife, Desert Eagle, Driver Gloves, Dual Berettas, FAMAS, Falchion Knife, Five-SeveN, Flip Knife, G3SG1, Galil AR, Glock-18, Gut Knife, Hand Wraps, Huntsman Knife, Hydra Gloves, Karambit, Kukri Knife, M249, M4A1-S, M4A4, M9 Bayonet, MAC-10, MAG-7, MP5-SD, MP7, MP9, Moto Gloves, Navaja Knife, Negev, Nomad Knife, Nova, P2000, P250, P90, PP-Bizon, Paracord Knife, R8 Revolver, SCAR-20, SG 553, SSG 08, Sawed-Off, Shadow Daggers, Skeleton Knife, Specialist Gloves, Sport Gloves, Stiletto Knife, Survival Knife, Talon Knife, Tec-9, UMP-45, USP-S, Ursus Knife, XM1014, Zeus x27"
+                        },
+                        {
+                          "key": "item_type",
+                          "value": "skin",
+                          "description": "agent, collectible, collection, crate, graffiti, highlight, key, keychain, music_kit, patch, skin, sticker"
+                        },
+                        {
+                          "key": "rarity",
+                          "value": "Covert",
+                          "description": "Base Grade, Classified, Consumer Grade, Contraband, Covert, Default, Distinguished, Exceptional, Exotic, Extraordinary, High Grade, Industrial Grade, Master, Mil-Spec Grade, Remarkable, Restricted, Superior"
+                        },
+                        {
+                          "key": "team",
+                          "value": "Terrorist",
+                          "description": "Both Teams, Counter-Terrorist, Terrorist"
+                        },
+                        {
+                          "key": "wear",
+                          "value": "Factory New",
+                          "description": "Factory New, Minimal Wear, Field-Tested, Well-Worn, Battle-Scarred"
+                        },
+                        {
+                          "key": "category",
+                          "value": "Rifles",
+                          "description": "Equipment, Gloves, Heavy, Knives, LMGs, Pistols, Rifles, SMGs, Snipers"
+                        },
+                        {
+                          "key": "tags",
+                          "value": "StatTrak",
+                          "description": "Souvenir, StatTrak"
+                        },
+                        {
+                          "key": "minPrice",
+                          "value": "10"
+                        },
+                        {
+                          "key": "maxPrice",
+                          "value": "1000"
+                        },
+                        {
+                          "key": "sort",
+                          "value": "popularity",
+                          "description": "abc, priceAsc, priceDesc, popularity"
+                        },
+                        {
+                          "key": "paint_index",
+                          "value": "",
+                          "description": "CS2 item paint indexes (~1300)",
+                          "type": "text",
+                          "disabled": true
+                        },
+                        {
+                          "key": "start",
+                          "value": "",
+                          "description": "1",
+                          "type": "text",
+                          "disabled": true
+                        },
+                        {
+                          "key": "end",
+                          "value": "",
+                          "description": "100",
+                          "type": "text",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "search suggestions",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{base_url}}/v1/market/search/suggestions?q=ak-47",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "market",
+                        "search",
+                        "suggestions"
+                      ],
+                      "query": [
+                        {
+                          "key": "q",
+                          "value": "ak-47",
+                          "description": "Query",
+                          "type": "text"
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "buy",
+              "item": [
+                {
+                  "name": "buy",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\r\n    \"itemId\": \"1489853784346198016\", \r\n    \"price\": 0.45, \r\n    \"method\": \"balance\", \r\n    \"market\": \"c5\",\r\n    \"tradeURL\": \"https://steamcommunity.com/tradeoffer/new/?partner=1872111350&token=Vw8qSy_0\"\r\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{base_url}}/v1/market/buy",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "market",
+                        "buy"
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "buy",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json",
+                            "type": "text"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\r\n    \"itemId\": \"2025012151594757867454465\", \r\n    \"price\": 0.03, \r\n    \"method\": \"balance\", \r\n    \"market\": \"ecosteam\",\r\n    \"tradeURL\": \"https://steamcommunity.com/tradeoffer/new/?partner=1872111350&token=Vw8qSy_0\"\r\n}",
+                          "options": {
+                            "raw": {
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{base_url}}/v1/market/buy",
+                          "host": [
+                            "{{base_url}}"
+                          ],
+                          "path": [
+                            "v1",
+                            "market",
+                            "buy"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": null,
+                      "header": [
+                        {
+                          "key": ":status",
+                          "value": 422
+                        },
+                        {
+                          "key": "server",
+                          "value": "nginx"
+                        },
+                        {
+                          "key": "date",
+                          "value": "Sat, 08 Nov 2025 14:53:46 GMT"
+                        },
+                        {
+                          "key": "content-type",
+                          "value": "application/json; charset=utf-8"
+                        },
+                        {
+                          "key": "content-length",
+                          "value": "245"
+                        },
+                        {
+                          "key": "cross-origin-opener-policy",
+                          "value": "same-origin"
+                        },
+                        {
+                          "key": "cross-origin-resource-policy",
+                          "value": "same-origin"
+                        },
+                        {
+                          "key": "origin-agent-cluster",
+                          "value": "?1"
+                        },
+                        {
+                          "key": "referrer-policy",
+                          "value": "no-referrer"
+                        },
+                        {
+                          "key": "strict-transport-security",
+                          "value": "max-age=31536000; includeSubDomains"
+                        },
+                        {
+                          "key": "x-content-type-options",
+                          "value": "nosniff"
+                        },
+                        {
+                          "key": "x-dns-prefetch-control",
+                          "value": "off"
+                        },
+                        {
+                          "key": "x-download-options",
+                          "value": "noopen"
+                        },
+                        {
+                          "key": "x-frame-options",
+                          "value": "SAMEORIGIN"
+                        },
+                        {
+                          "key": "x-permitted-cross-domain-policies",
+                          "value": "none"
+                        },
+                        {
+                          "key": "x-xss-protection",
+                          "value": "0"
+                        },
+                        {
+                          "key": "x-ratelimit-limit",
+                          "value": "10000"
+                        },
+                        {
+                          "key": "x-ratelimit-remaining",
+                          "value": "9998"
+                        },
+                        {
+                          "key": "x-ratelimit-reset",
+                          "value": "1762613687"
+                        },
+                        {
+                          "key": "x-request-id",
+                          "value": "7ddb381a-aa47-4a25-b4c6-60ffee8084da"
+                        },
+                        {
+                          "key": "etag",
+                          "value": "W/\"f5-pXfrzuvUQPzQ41UhvTDFUKrvU9Q\""
+                        },
+                        {
+                          "key": "vary",
+                          "value": "Accept-Encoding"
+                        },
+                        {
+                          "key": "content-security-policy",
+                          "value": "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self';"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n    \"requestId\": \"7ddb381a-aa47-4a25-b4c6-60ffee8084da\",\n    \"success\": false,\n    \"error\": {\n        \"code\": \"VALIDATION_ERROR\",\n        \"message\": \"One or more fields failed validation.\",\n        \"meta\": {\n            \"fieldErrors\": {\n                \"tradeURL\": \"tradeURL is not allowed for JWT-authenticated users.\"\n            }\n        }\n    }\n}"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "item",
+              "item": [
+                {
+                  "name": "item wears",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/market/item/{{itemid_example}}/overview",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "market",
+                        "item",
+                        "{{itemid_example}}",
+                        "overview"
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "item",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/market/item/{{itemid_example}}",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "market",
+                        "item",
+                        "{{itemid_example}}"
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "items",
+              "item": [
+                {
+                  "name": "items",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/market/items?fastDeliveryOnly=true",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "market",
+                        "items"
+                      ],
+                      "query": [
+                        {
+                          "key": "fastDeliveryOnly",
+                          "value": "true",
+                          "description": "True, false, True is required for assetpay development",
+                          "type": "text"
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "user",
+          "item": [
+            {
+              "name": "transactions",
+              "item": [
+                {
+                  "name": "transactions",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/user/transactions?page=1&limit=100",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "user",
+                        "transactions"
+                      ],
+                      "query": [
+                        {
+                          "key": "page",
+                          "value": "1",
+                          "description": "1-9999"
+                        },
+                        {
+                          "key": "limit",
+                          "value": "100",
+                          "description": "Max 100"
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "stats",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/user/transactions/stats",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "user",
+                        "transactions",
+                        "stats"
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "fees",
+              "item": [
+                {
+                  "name": "fees",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/user/fees",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "user",
+                        "fees"
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "orders",
+              "item": [
+                {
+                  "name": "orders",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/user/orders",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "user",
+                        "orders"
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "wallet",
+              "item": [
+                {
+                  "name": "withdraw",
+                  "item": [
+                    {
+                      "name": "withdraw",
+                      "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\r\n    \"method\": \"crypto\", \r\n    \"token\": \"USDC\", \r\n    \"network\": \"APT\", \r\n    \"address\": \"wallet-address-here\", \r\n    \"amount\": 1000\r\n}\r\n",
+                          "options": {
+                            "raw": {
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{base_url}}/v1/user/wallet/withdraw",
+                          "host": [
+                            "{{base_url}}"
+                          ],
+                          "path": [
+                            "v1",
+                            "user",
+                            "wallet",
+                            "withdraw"
+                          ]
+                        }
+                      },
+                      "response": []
+                    },
+                    {
+                      "name": "fees",
+                      "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                          "raw": "{{base_url}}/v1/user/wallet/withdraw/fees?currency=USDT",
+                          "host": [
+                            "{{base_url}}"
+                          ],
+                          "path": [
+                            "v1",
+                            "user",
+                            "wallet",
+                            "withdraw",
+                            "fees"
+                          ],
+                          "query": [
+                            {
+                              "key": "currency",
+                              "value": "USDT",
+                              "description": "USDT or USDC"
+                            }
+                          ]
+                        }
+                      },
+                      "response": []
+                    }
+                  ]
+                },
+                {
+                  "name": "deposit",
+                  "item": [
+                    {
+                      "name": "crypto",
+                      "item": [
+                        {
+                          "name": "chains",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{base_url}}/v1/user/wallet/deposit/crypto/chains?currency=USDC",
+                              "host": [
+                                "{{base_url}}"
+                              ],
+                              "path": [
+                                "v1",
+                                "user",
+                                "wallet",
+                                "deposit",
+                                "crypto",
+                                "chains"
+                              ],
+                              "query": [
+                                {
+                                  "key": "currency",
+                                  "value": "USDC"
+                                }
+                              ]
+                            }
+                          },
+                          "response": []
+                        },
+                        {
+                          "name": "rates",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{base_url}}/v1/user/wallet/deposit/crypto/rates",
+                              "host": [
+                                "{{base_url}}"
+                              ],
+                              "path": [
+                                "v1",
+                                "user",
+                                "wallet",
+                                "deposit",
+                                "crypto",
+                                "rates"
+                              ]
+                            }
+                          },
+                          "response": []
+                        },
+                        {
+                          "name": "crypto",
+                          "request": {
+                            "method": "POST",
+                            "header": [],
+                            "body": {
+                              "mode": "raw",
+                              "raw": "{\r\n    \"token\": \"USDT\", \r\n    \"network\": \"ETH\",\r\n    \"amount\": 10\r\n}\r\n\r\n//Possible tokens explained in get chains route, possible networks optainable by fetching get chains route",
+                              "options": {
+                                "raw": {
+                                  "language": "json"
+                                }
+                              }
+                            },
+                            "url": {
+                              "raw": "{{base_url}}/v1/user/wallet/deposit/crypto",
+                              "host": [
+                                "{{base_url}}"
+                              ],
+                              "path": [
+                                "v1",
+                                "user",
+                                "wallet",
+                                "deposit",
+                                "crypto"
+                              ]
+                            }
+                          },
+                          "response": []
+                        }
+                      ]
+                    },
+                    {
+                      "name": "onramp",
+                      "item": [
+                        {
+                          "name": "session",
+                          "request": {
+                            "method": "POST",
+                            "header": [],
+                            "body": {
+                              "mode": "raw",
+                              "raw": "{\r\n    \"coinCode\": \"usdc\", // usdc or usdt (for europeans only usdc is avialable everyone else we prefer usdt)\r\n    \"fiatType\": 12, // EUR: 12, GBP: 20, USD: 21\r\n    \"redirectUrl\": \"https://skinshark.gg\", \r\n    \"fiatAmount\": 22, // either use this or fiatAmount\r\n    \"network\": \"bep20\"\r\n    //\"coinAmount\": 25\r\n}\r\n",
+                              "options": {
+                                "raw": {
+                                  "language": "json"
+                                }
+                              }
+                            },
+                            "url": {
+                              "raw": "{{base_url}}/v1/user/wallet/deposit/onramp/session",
+                              "host": [
+                                "{{base_url}}"
+                              ],
+                              "path": [
+                                "v1",
+                                "user",
+                                "wallet",
+                                "deposit",
+                                "onramp",
+                                "session"
+                              ]
+                            }
+                          },
+                          "response": []
+                        },
+                        {
+                          "name": "quote",
+                          "request": {
+                            "method": "POST",
+                            "header": [],
+                            "body": {
+                              "mode": "raw",
+                              "raw": "{\r\n    \"fiatAmount\": 25,\r\n    \"fiatType\": 21, // EUR: 12, GBP: 20, USD: 21\r\n    \"type\": 1,\r\n    \"coinCode\": \"usdc\", // usdc or usdt (for europeans only usdc is avialable everyone else we prefer usdt)\r\n    \"countryCode\": \"us\"\r\n}",
+                              "options": {
+                                "raw": {
+                                  "language": "json"
+                                }
+                              }
+                            },
+                            "url": {
+                              "raw": "{{base_url}}/v1/user/wallet/deposit/onramp/quote",
+                              "host": [
+                                "{{base_url}}"
+                              ],
+                              "path": [
+                                "v1",
+                                "user",
+                                "wallet",
+                                "deposit",
+                                "onramp",
+                                "quote"
+                              ]
+                            }
+                          },
+                          "response": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "wallet",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/user/wallet?limit=50&page=1",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "user",
+                        "wallet"
+                      ],
+                      "query": [
+                        {
+                          "key": "limit",
+                          "value": "50",
+                          "description": "Max 100"
+                        },
+                        {
+                          "key": "page",
+                          "value": "1"
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "cancel",
+                  "request": {
+                    "method": "POST",
+                    "header": [],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{base_url}}/v1/user/wallet/{{deposit_id}}/cancel",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "user",
+                        "wallet",
+                        "{{deposit_id}}",
+                        "cancel"
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "ledger",
+              "item": [
+                {
+                  "name": "ledger",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/user/ledger?page=1&limit=50",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "user",
+                        "ledger"
+                      ],
+                      "query": [
+                        {
+                          "key": "page",
+                          "value": "1"
+                        },
+                        {
+                          "key": "limit",
+                          "value": "50"
+                        },
+                        {
+                          "key": "type",
+                          "value": "credit,debit,neutral",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "user",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/user",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "user"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "partner",
+          "item": [
+            {
+              "name": "onramp",
+              "item": [
+                {
+                  "name": "limitsMapping",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/partner/onramp/limitsMapping",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "partner",
+                        "onramp",
+                        "limitsMapping"
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "allCountryConfig",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/partner/onramp/allCountryConfig",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "partner",
+                        "onramp",
+                        "allCountryConfig"
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "allConfigMapping",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v1/partner/onramp/allConfigMapping",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v1",
+                        "partner",
+                        "onramp",
+                        "allConfigMapping"
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "creating a subuser",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"email\": \"benji.bekesi+1@gmail.com\",\r\n  \"name\": \"weiser\",\r\n  \"description\": \"Skinsauna user c0647eb3-9c2e-4892-b3a7-778d74678ddb\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/v1/partner/users",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "partner",
+                    "users"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "transfer balance to subuser by email",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"toEmail\": \"benji.bekesi+2@gmail.com\",\r\n  \"amountCents\": 20,\r\n  \"idempotencyKey\": \"871d43ef-df3e-431a-a177-ca1f63a60a3b\"\r\n}\r\n",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/v1/partner/transfers",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "partner",
+                    "transfers"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "transfer balance to subuser by apikey",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"toApiKeyId\": \"64fa1d0c2b3a4e00000000e9\",\r\n  \"amountCents\": 5000,\r\n  \"idempotencyKey\": \"unique-transfer-uuid-123\"\r\n}\r\n",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/v1/partner/transfers",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "partner",
+                    "transfers"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "live market (pricempire top 500)",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": ""
+                },
+                "url": {
+                  "raw": "{{base_url}}/v1/partner/live/listings",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "partner",
+                    "live",
+                    "listings"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "listing detail",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "method": "GET",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/v1/partner/listing-detail?item=4a27ccaf8769fd11&listing=1482075074326503424&market=c5",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "partner",
+                    "listing-detail"
+                  ],
+                  "query": [
+                    {
+                      "key": "item",
+                      "value": "4a27ccaf8769fd11",
+                      "description": "skinshark itemid"
+                    },
+                    {
+                      "key": "listing",
+                      "value": "1482075074326503424",
+                      "description": "listingid"
+                    },
+                    {
+                      "key": "market",
+                      "value": "c5",
+                      "description": "c5 or ecosteam"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "stats",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "method": "GET",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/v1/partner/stats",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "partner",
+                    "stats"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "market health",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "method": "GET",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/v1/partner/market-health",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "partner",
+                    "market-health"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "v2",
+      "item": [
+        {
+          "name": "market",
+          "item": [
+            {
+              "name": "listings",
+              "item": [
+                {
+                  "name": "listings",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v2/market/listings?item=4a27ccaf8769fd11&page=1&delivery=normal",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v2",
+                        "market",
+                        "listings"
+                      ],
+                      "query": [
+                        {
+                          "key": "item",
+                          "value": "4a27ccaf8769fd11"
+                        },
+                        {
+                          "key": "page",
+                          "value": "1"
+                        },
+                        {
+                          "key": "delivery",
+                          "value": "normal"
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "search",
+              "item": [
+                {
+                  "name": "search",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{base_url}}/v2/market/search?q=ak-47&weapon=AK-47&itemType=skin&rarity=Covert&team=Terrorist&wear=Factory New&category=Rifles&tags=StatTrak&minPrice=10&maxPrice=1000&sort=popularity",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v2",
+                        "market",
+                        "search"
+                      ],
+                      "query": [
+                        {
+                          "key": "q",
+                          "value": "ak-47",
+                          "description": "Query of the search input"
+                        },
+                        {
+                          "key": "weapon",
+                          "value": "AK-47",
+                          "description": "AK-47, AUG, AWP, Bayonet, Bloodhound Gloves, Bowie Knife, Broken Fang Gloves, Butterfly Knife, CZ75-Auto, Classic Knife, Desert Eagle, Driver Gloves, Dual Berettas, FAMAS, Falchion Knife, Five-SeveN, Flip Knife, G3SG1, Galil AR, Glock-18, Gut Knife, Hand Wraps, Huntsman Knife, Hydra Gloves, Karambit, Kukri Knife, M249, M4A1-S, M4A4, M9 Bayonet, MAC-10, MAG-7, MP5-SD, MP7, MP9, Moto Gloves, Navaja Knife, Negev, Nomad Knife, Nova, P2000, P250, P90, PP-Bizon, Paracord Knife, R8 Revolver, SCAR-20, SG 553, SSG 08, Sawed-Off, Shadow Daggers, Skeleton Knife, Specialist Gloves, Sport Gloves, Stiletto Knife, Survival Knife, Talon Knife, Tec-9, UMP-45, USP-S, Ursus Knife, XM1014, Zeus x27"
+                        },
+                        {
+                          "key": "itemType",
+                          "value": "skin",
+                          "description": "agent, collectible, collection, crate, graffiti, highlight, key, keychain, music_kit, patch, skin, sticker"
+                        },
+                        {
+                          "key": "rarity",
+                          "value": "Covert",
+                          "description": "Base Grade, Classified, Consumer Grade, Contraband, Covert, Default, Distinguished, Exceptional, Exotic, Extraordinary, High Grade, Industrial Grade, Master, Mil-Spec Grade, Remarkable, Restricted, Superior"
+                        },
+                        {
+                          "key": "team",
+                          "value": "Terrorist",
+                          "description": "Both Teams, Counter-Terrorist, Terrorist"
+                        },
+                        {
+                          "key": "wear",
+                          "value": "Factory New",
+                          "description": "Factory New, Minimal Wear, Field-Tested, Well-Worn, Battle-Scarred"
+                        },
+                        {
+                          "key": "category",
+                          "value": "Rifles",
+                          "description": "Equipment, Gloves, Heavy, Knives, LMGs, Pistols, Rifles, SMGs, Snipers"
+                        },
+                        {
+                          "key": "tags",
+                          "value": "StatTrak",
+                          "description": "Souvenir, StatTrak"
+                        },
+                        {
+                          "key": "minPrice",
+                          "value": "10"
+                        },
+                        {
+                          "key": "maxPrice",
+                          "value": "1000"
+                        },
+                        {
+                          "key": "sort",
+                          "value": "popularity",
+                          "description": "abc, priceAsc, priceDesc, popularity"
+                        },
+                        {
+                          "key": "paintIndex",
+                          "value": "",
+                          "description": "CS2 item paint indexes (~1300)",
+                          "type": "text",
+                          "disabled": true
+                        },
+                        {
+                          "key": "start",
+                          "value": "",
+                          "description": "1",
+                          "type": "text",
+                          "disabled": true
+                        },
+                        {
+                          "key": "end",
+                          "value": "",
+                          "description": "100",
+                          "type": "text",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "search suggestions",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{base_url}}/v2/market/search/suggestions?q=ak-47",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v2",
+                        "market",
+                        "search",
+                        "suggestions"
+                      ],
+                      "query": [
+                        {
+                          "key": "q",
+                          "value": "ak-47",
+                          "description": "Query"
+                        }
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "buy",
+              "item": [
+                {
+                  "name": "buy",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\r\n    \"itemId\": \"1494954737741336576\", \r\n    \"price\": 0.01, \r\n    \"market\": \"c5game\",\r\n    \"tradeUrl\": \"https://steamcommunity.com/tradeoffer/new/?partner=1872111350&token=Vw8qSy_0\"\r\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{base_url}}/v2/market/buy",
+                      "host": [
+                        "{{base_url}}"
+                      ],
+                      "path": [
+                        "v2",
+                        "market",
+                        "buy"
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "partner",
+          "item": [
+            {
+              "name": "live market (pricempire top 500)",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": ""
+                },
+                "url": {
+                  "raw": "{{base_url}}/v2/partner/live/listings",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v2",
+                    "partner",
+                    "live",
+                    "listings"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "listing detail",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"items\": [\r\n        { \"item\": \"567bab62f59de004\", \"listing\": \"2026012171560510343364609\", \"market\": \"ecosteam\" }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/v2/partner/listing-detail",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v2",
+                    "partner",
+                    "listing-detail"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{api-key}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "api-key",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "base_url",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "itemid_example",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "693ec613c3f4b657b2848342",
+      "value": "",
+      "type": "default"
+    }
+  ]
+}

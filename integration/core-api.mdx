@@ -1,0 +1,94 @@
+---
+title: "Core API"
+description: "Single central account integration for most merchants."
+---
+
+## What Core API means
+
+Core API means your company uses **one SkinShark account** as the single operator account.
+
+Your website can have many end users, but on the SkinShark side all trading and wallet activity is handled by one API key/account context.
+
+This is the simplest integration model and is usually the best starting point.
+
+## Why teams choose Core API
+
+Teams usually pick Core API when they want to go live fast and avoid account orchestration complexity.
+
+Common reasons:
+
+- You want to launch trading quickly with fewer moving parts.
+- You do not need separate balances per merchant/sub-brand.
+- Your finance and reconciliation can be done at one global account level.
+- One operations team manages trading and funding centrally.
+
+## When Core API is the right choice
+
+Choose Core API if most of these are true:
+
+- You run a single storefront or product.
+- You have one treasury/balance pool for all transactions.
+- You do not need to provision sub-accounts for downstream merchants.
+- You are okay with one consolidated ledger and order history.
+
+## What daily operation looks like
+
+In production, Core API is usually:
+
+1. Your app searches and displays inventory with v2 market endpoints.
+2. User action triggers purchase via `POST /v2/market/buy`.
+3. Your backend stores `skinsharkOrderId` and polls `GET /v1/user/orders` for reconciliation.
+4. Your accounting service reads `GET /v1/user/transactions` and `GET /v1/user/ledger`.
+5. Your webhook endpoint processes `order.updated` and `order.refunded`.
+6. Your ops dashboard watches `GET /v1/user/wallet` for funding and withdrawal state.
+
+## Pros and tradeoffs
+
+Pros:
+
+- Fastest integration.
+- Lowest implementation and maintenance cost.
+- Clear operational ownership.
+
+Tradeoffs:
+
+- No per-merchant account isolation in SkinShark.
+- All activity is mixed into one account history.
+- If you later need tenant-level account separation, you will migrate to Full Platform mode.
+
+## Endpoint strategy
+
+- Prefer **v2 market** and **v2 partner market data** endpoints.
+- Use **v1 user/wallet** for balances, ledger, transactions, orders, deposits, and withdrawals.
+- Skip sub-account and partner transfer endpoints unless you explicitly need them.
+
+## Minimum endpoint set
+
+- `GET /v2/market/search`
+- `GET /v2/market/search/suggestions`
+- `GET /v2/market/listings`
+- `POST /v2/market/buy`
+- `GET /v2/partner/live/listings`
+- `POST /v2/partner/listing-detail`
+- `GET /v1/user`
+- `GET /v1/user/orders`
+- `GET /v1/user/transactions`
+- `GET /v1/user/ledger`
+- `GET /v1/user/wallet`
+
+## Optional funding endpoints
+
+- `POST /v1/user/wallet/deposit/crypto`
+- `POST /v1/user/wallet/deposit/onramp/session`
+- `POST /v1/user/wallet/withdraw`
+
+## If you outgrow Core API
+
+You can move to Full Platform later when you need tenant-level isolation.
+
+The migration is typically:
+
+1. Keep v2 market usage unchanged.
+2. Introduce child key provisioning (`POST /v1/partner/users`).
+3. Route each merchant to its own child key.
+4. Move treasury flow to partner transfers (`POST /v1/partner/transfers`).

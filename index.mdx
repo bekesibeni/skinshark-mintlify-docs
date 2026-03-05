@@ -1,0 +1,62 @@
+---
+title: "SkinShark partner API"
+description: "Integrate SkinShark liquidity, wallet, and partner operations into your own product."
+---
+
+## Overview
+
+SkinShark exposes two implementation modes for businesses and merchants:
+
+- **Core API**: one central partner account that trades, tracks wallet activity, and uses v2 market endpoints.
+- **Full Platform**: partner account plus sub-accounts (merchant API keys), internal balance transfers, and full partner operations.
+
+Use **v2 endpoints** whenever they exist. Use v1 endpoints only for features that are not yet available in v2.
+
+## Base URLs
+
+- **Production**: `https://api.skinshark.gg`
+- **Staging**: provided by the SkinShark team
+
+## Authentication
+
+SkinShark Partner API uses API key authentication only.
+
+```http
+X-API-Key: <your_api_key>
+```
+
+- Top-level partner keys can create sub-accounts and perform partner transfers.
+- Child/sub-account keys are merchant-scoped credentials under a top-level partner.
+
+## Response envelope
+
+Most endpoints use:
+
+```json
+{
+  "requestId": "9b7f7d58-8c3a-41a3-9be2-a393d4e8bc95",
+  "success": true,
+  "data": {}
+}
+```
+
+Error responses commonly use:
+
+```json
+{
+  "requestId": "9b7f7d58-8c3a-41a3-9be2-a393d4e8bc95",
+  "success": false,
+  "data": {
+    "code": "INVALID_PRICE",
+    "message": "Provided price ($1) does not match current price ($1.2)."
+  }
+}
+```
+
+Validation errors use a separate shape with `error.meta.fieldErrors`.
+
+## Next steps
+
+1. Start with [quickstart](/quickstart).
+2. Choose your integration mode: [Core API](/integration/core-api) or [Full Platform](/integration/full-platform).
+3. Implement webhook verification from [Webhooks](/guides/webhooks).

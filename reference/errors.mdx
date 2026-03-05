@@ -1,0 +1,61 @@
+---
+title: "Errors"
+description: "Error formats, status codes, and retry guidance."
+---
+
+## Error formats
+
+### Standard error
+
+```json
+{
+  "requestId": "44ecb0a4-8fa2-4ef0-b823-b57a21ea2e6b",
+  "success": false,
+  "data": {
+    "code": "INSUFFICIENT_FUNDS",
+    "message": "Partner account balance is insufficient"
+  }
+}
+```
+
+### Validation error
+
+```json
+{
+  "requestId": "44ecb0a4-8fa2-4ef0-b823-b57a21ea2e6b",
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "One or more fields failed validation.",
+    "meta": {
+      "fieldErrors": {
+        "amountCents": "amountCents must be at least 1"
+      }
+    }
+  }
+}
+```
+
+## Common status codes
+
+- `200`: Success
+- `201`: Resource created
+- `202`: Accepted/queued operation
+- `400`: Invalid request state or business condition
+- `401`: Missing/invalid API key
+- `402`: Insufficient funds or billing issue
+- `403`: Forbidden (often top-level key required)
+- `404`: Not found
+- `409`: Duplicate resource
+- `415`: Unsupported content type
+- `422`: Validation error
+- `429`: Rate limited
+- `500`: Internal server error
+- `502`: Upstream market/onramp service error
+- `503`: Market health degraded/down
+
+## Retry guidance
+
+- Safe to retry: reads (`GET`), webhook handlers (idempotent handlers), and transfer requests with the same `idempotencyKey`.
+- Do not blind-retry buys after network timeouts; reconcile first with `GET /v1/user/orders`.
+- For `429`, respect `Retry-After` and the rate-limit headers.

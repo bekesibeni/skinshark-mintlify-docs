@@ -1,0 +1,41 @@
+---
+title: "Rate limits"
+description: "Current API rate tiers, request cost rules, and response headers."
+---
+
+## Tier limits
+
+Per 60-second window:
+
+- `guest`: 200 points
+- `user`: 2,000 points
+- `partner`: 10,000 points
+- `admin`: no limiter
+
+## Cost model
+
+- `GET`: 1 point (default)
+- `POST`: 2 points
+- `PUT`: 2 points
+- `PATCH`: 2 points
+- `DELETE`: 3 points
+- `/auth` paths: 5 points
+
+## Headers
+
+Successful responses include:
+
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Reset` (epoch seconds)
+
+Rate-limited responses include:
+
+- `Retry-After`
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining: 0`
+- `X-RateLimit-Reset`
+
+## Request ID
+
+All responses include `X-Request-Id`. Persist this in your logs for support and incident tracing.

@@ -1,0 +1,162 @@
+---
+title: "Full Platform"
+description: "Partner reseller model: merchants integrate your API and serve your services to their own end users."
+---
+
+## What this model is
+
+Full Platform is the right model when **your partners are merchants** and each merchant uses your integration to provide SkinShark-powered functionality to that merchant's own end users.
+
+This is not a marketplace model where many merchants share one operating account.
+
+In Full Platform:
+
+- You operate one **top-level partner account**.
+- Each merchant gets its own **child API key**.
+- Each child key represents that merchant's isolated account context.
+- The merchant then uses that child key to run end-user flows (browse, buy, wallet, orders, ledger).
+
+## Why businesses use Full Platform
+
+Businesses choose this when they are selling infrastructure/services to merchants, and merchants are selling to end users.
+
+Typical reasons:
+
+- You need clean merchant-level separation.
+- You want controlled balance allocation per merchant.
+- You need merchant-level reporting and operational controls.
+- You want to onboard/suspend merchants without impacting others.
+
+## Roles and responsibilities
+
+### You (platform partner)
+
+- Own and secure the top-level partner key.
+- Onboard merchants and issue child keys.
+- Fund merchant accounts via partner transfers.
+- Monitor merchant operations and market health.
+
+### Merchant client
+
+- Uses the child key you issued.
+- Implements end-user flows with market/user/wallet endpoints.
+- Handles end-user UX, support, and local business logic.
+
+### End user (merchant customer)
+
+- Interacts only with the merchant's product.
+- Does not manage SkinShark partner primitives directly.
+
+## How it works end-to-end
+
+1. You onboard a merchant.
+2. You create a child key using `POST /v1/partner/users`.
+3. You transfer initial balance to that child account using `POST /v1/partner/transfers`.
+4. Merchant integrates trading and wallet endpoints with its child key.
+5. Merchant serves end users through its own frontend/backend.
+6. You and the merchant monitor orders, funds, and health.
+
+## Endpoint scope in Full Platform
+
+In Full Platform, you should expect to implement **almost the entire partner collection**.
+
+This includes:
+
+- v2 market (primary)
+- v1 market (legacy + item detail helpers)
+- v1 user and wallet
+- v1 and v2 partner endpoints
+- crypto and onramp deposit flows
+
+Rule of thumb: if an endpoint is in your partner collection, Full Platform usually needs it either now or very soon.
+
+### Merchant provisioning and treasury (you)
+
+- `POST /v1/partner/users`
+- `POST /v1/partner/transfers`
+- `GET /v1/partner/stats`
+- `GET /v1/partner/market-health`
+- `GET /v1/partner/onramp/limitsMapping`
+- `GET /v1/partner/onramp/allCountryConfig`
+- `GET /v1/partner/onramp/allConfigMapping`
+
+### Merchant runtime operations (merchant child key)
+
+#### Market and item discovery
+
+- `GET /v2/market/search`
+- `GET /v2/market/search/suggestions`
+- `GET /v2/market/listings`
+- `POST /v2/market/buy`
+- `GET /v2/partner/live/listings`
+- `POST /v2/partner/listing-detail`
+
+#### Legacy market compatibility and item endpoints
+
+- `GET /v1/market/listings`
+- `GET /v1/market/search`
+- `GET /v1/market/search/suggestions`
+- `POST /v1/market/buy`
+- `GET /v1/market/item/{id}`
+- `GET /v1/market/items`
+- `GET /v1/market/item/{id}/overview` (top-level partner key required)
+
+#### Account, orders, and accounting
+
+- `GET /v1/user`
+- `GET /v1/user/orders`
+- `GET /v1/user/transactions`
+- `GET /v1/user/transactions/stats`
+- `GET /v1/user/fees`
+- `GET /v1/user/ledger`
+- `GET /v1/user/wallet`
+
+#### Wallet funding and payout
+
+- `POST /v1/user/wallet/withdraw`
+- `GET /v1/user/wallet/withdraw/fees`
+- `POST /v1/user/wallet/deposit/crypto`
+- `GET /v1/user/wallet/deposit/crypto/chains`
+- `GET /v1/user/wallet/deposit/crypto/rates` (top-level partner key required)
+- `POST /v1/user/wallet/deposit/onramp/session`
+- `POST /v1/user/wallet/deposit/onramp/quote`
+- `POST /v1/user/wallet/{depositId}/cancel`
+
+#### Partner live market legacy support
+
+- `GET /v1/partner/live/listings`
+- `GET /v1/partner/listing-detail`
+
+## Recommended auth split
+
+- Use the **top-level partner key** for merchant provisioning, partner treasury transfers, platform monitoring, and top-level-only endpoints.
+- Use **merchant child keys** for merchant runtime flows (market, buy, user, wallet, orders, ledger, deposits, withdrawals).
+
+## Funding and risk control pattern
+
+Recommended operational pattern:
+
+1. Keep most capital in top-level partner treasury.
+2. Push working balance to merchants as needed.
+3. Use idempotent transfers (`idempotencyKey`) for safe retries.
+4. Reconcile merchant activity regularly via ledger and orders.
+
+This reduces blast radius and keeps controls centralized while allowing merchant autonomy.
+
+## Common mistakes to avoid
+
+- Treating Full Platform as one shared account model.
+- Reusing one child key across multiple merchants.
+- Skipping transfer idempotency.
+- Not correlating incidents with `requestId`.
+- Mixing merchant operational logs without tenant isolation.
+
+## Should you choose Full Platform?
+
+Use Full Platform if:
+
+- You sell your integration to merchant clients.
+- Merchant account isolation is required.
+- You need merchant-level funding and controls.
+
+If you only run one central operating account and do not need merchant isolation, use [Core API](/integration/core-api).

@@ -1,0 +1,139 @@
+---
+title: "Webhooks"
+description: "Event delivery model, signature verification, retries, and payload contracts."
+---
+
+## Current event types
+
+Emitted now:
+
+- `order.updated`
+- `order.refunded`
+
+Defined in backend model but not currently emitted by public order flows:
+
+- `deposit.created`
+- `deposit.completed`
+- `deposit.failed`
+
+## Delivery headers
+
+SkinShark sends:
+
+- `content-type: application/json`
+- `user-agent: skinshark-webhooks/1.0`
+- `x-skinshark-signature: t=<unix>,v1=<hex_hmac_sha256>`
+- `x-skinshark-event-id: <event_id>`
+- `x-skinshark-event-type: <event_type>`
+
+## Signature algorithm
+
+Signature input:
+
+```text
+<timestamp>.<raw_json_body>
+```
+
+Digest:
+
+```text
+v1 = HMAC_SHA256(secret, timestamp + "." + rawBody)
+```
+
+Recommended tolerance window: 300 seconds.
+
+## Verification in TypeScript SDK
+
+```ts
+import { SkinsharkSDK } from 'skinshark-sdk';
+
+const sdk = new SkinsharkSDK({
+  apiKey: process.env.SKINSHARK_API_KEY!,
+  apiSecret: process.env.SKINSHARK_WEBHOOK_SECRET!
+});
+
+const signature = req.header('x-skinshark-signature') || '';
+const rawBody = req.body; // Buffer from express.raw({ type: 'application/json' })
+
+const verification = sdk.verifySignature(signature, rawBody, 300);
+if (!verification.isValid) {
+  return res.status(401).json({ error: verification.error || 'Invalid signature' });
+}
+```
+
+## Minimal Express handler
+
+```ts
+import express from 'express';
+
+const app = express();
+app.post('/webhooks/skinshark', express.raw({ type: 'application/json' }), (req, res) => {
+  const signature = req.header('x-skinshark-signature') || '';
+  const verification = sdk.verifySignature(signature, req.body);
+
+  if (!verification.isValid) {
+    return res.status(401).json({ ok: false });
+  }
+
+  const event = JSON.parse(req.body.toString('utf8'));
+
+  // Idempotency key: event.id
+  // Persist first, then ack
+  handleEvent(event);
+
+  return res.status(200).json({ received: true });
+});
+```
+
+## Retry and disable behavior
+
+- Dispatcher runs every minute.
+- Failed deliveries are retried with increasing backoff, up to 16 attempts total.
+- After 10 consecutive failures, the subscription is automatically disabled.
+
+## Example payloads
+
+### `order.updated`
+
+```json
+{
+  "id": "c66a66ca-8a2a-4f65-bd8d-e26e470d98fb",
+  "type": "order.updated",
+  "created": 1764237638,
+  "data": {
+    "id": "6928213ddeb8130d609b6ef3",
+    "item": "P250 | Sand Dune (Field-Tested)",
+    "itemId": "1468099453326794752",
+    "amount": 0.03,
+    "currency": "USD",
+    "status": {
+      "code": "PENDING",
+      "label": "Awaiting counterparty."
+    },
+    "timestamp": 1764237638,
+    "cancelType": 0,
+    "cancelReason": "",
+    "settlementTime": null,
+    "protectedCauser": 0
+  }
+}
+```
+
+### `order.refunded`
+
+```json
+{
+  "id": "f8f1e6bb-d204-4c3f-9c44-d93f3b8c7c90",
+  "type": "order.refunded",
+  "created": 1764239000,
+  "data": {
+    "id": "6928213ddeb8130d609b6ef3",
+    "amount": 14.71,
+    "currency": "USD",
+    "reason": "cancelled",
+    "protectedCauser": 0,
+    "settlementTime": null,
+    "timestamp": 1764239000
+  }
+}
+```

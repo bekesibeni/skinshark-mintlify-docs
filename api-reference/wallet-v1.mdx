@@ -1,0 +1,382 @@
+---
+title: "Wallet API v1"
+description: "Balances, deposits, withdrawals, onramp sessions/quotes, and wallet history."
+---
+
+## GET `/v1/user/wallet`
+
+Return balance plus paginated deposit/withdrawal activity.
+
+### Query type
+
+```ts
+interface GetWalletQuery {
+  page?: number;
+  limit?: number;
+  status?:
+    | 'initiated'
+    | 'pending'
+    | 'completed'
+    | 'cancelled'
+    | 'expired'
+    | 'partial'
+    | 'refunded'
+    | 'refund_rejected'
+    | 'exchange_failed'
+    | 'conversion_delay'
+    | 'queued'
+    | 'processing'
+    | 'failed';
+}
+```
+
+### Response type
+
+```ts
+type GetWalletResponse = ApiSuccess<{
+  balance: number;
+  currency: string;
+  page: number;
+  limit: number;
+  total: number;
+  deposits: Array<Record<string, unknown>>;
+  withdrawalsTotal: number;
+  withdrawals: Array<{
+    id: string;
+    amount: number;
+    currency: string;
+    method: 'crypto';
+    status: string;
+    timestamp: number;
+  }>;
+  message: string;
+}>;
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/user/wallet?limit=50&page=1" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+## POST `/v1/user/wallet/{depositId}/cancel`
+
+Cancel an initiated deposit.
+
+### Response type
+
+```ts
+type CancelDepositResponse = ApiSuccess<{
+  depositId: string;
+  status: 'cancelled';
+  message: string;
+}>;
+```
+
+### Example
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v1/user/wallet/<DEPOSIT_ID>/cancel" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <YOUR_API_KEY>" \
+  --data '{}'
+```
+
+## POST `/v1/user/wallet/withdraw`
+
+Create a crypto withdrawal. If exchange liquidity is low, withdrawal can be queued.
+
+### Request type
+
+```ts
+interface WithdrawRequest {
+  token: 'USDT' | 'USDC';
+  network: string;
+  address: string;
+  amount: number;
+}
+```
+
+### Response type
+
+```ts
+type WithdrawResponse =
+  | ApiSuccess<{
+      id: string;
+      status: 'pending';
+      token: string;
+      fee: { network: number; site: number; total: number };
+      receiveAmount: number;
+      withdraw_exchange_id: string;
+      message: string;
+    }>
+  | ApiSuccess<{
+      id: string;
+      status: 'queued';
+      queued: true;
+      message: string;
+    }>;
+```
+
+### Example
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v1/user/wallet/withdraw" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <YOUR_API_KEY>" \
+  --data '{
+    "token": "USDC",
+    "network": "APT",
+    "address": "0x9f2c7f248b1d45a8fa6fca20c29d23f4192632b6a4ce472f90d5d6d5aa8a54fe",
+    "amount": 1000
+  }'
+```
+
+## GET `/v1/user/wallet/withdraw/fees`
+
+Return withdrawal network fees for a token.
+
+### Query type
+
+```ts
+interface WithdrawFeesQuery {
+  currency: string;
+}
+```
+
+### Response type
+
+```ts
+type WithdrawFeesResponse = Array<{
+  name: string;
+  fee: number;
+}>;
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/user/wallet/withdraw/fees?currency=USDT" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+## POST `/v1/user/wallet/deposit/crypto`
+
+Create a crypto deposit invoice/session.
+
+### Request type
+
+```ts
+interface CryptoDepositRequest {
+  token: 'USDT' | 'USDC' | 'DAI' | 'BTC' | 'ETH' | 'SOL' | 'POL';
+  amount: number;
+  network: string;
+}
+```
+
+### Response type
+
+```ts
+type CryptoDepositResponse = ApiSuccess<{
+  depositId: string;
+  prepayId: string;
+  payAmountToken: number;
+  payAmountUsd: number;
+  netTokenAmount: number;
+  grossTokenAmount: number;
+  platformFeeRate: number;
+  gatewayFee: number;
+  expireTime: string;
+  gateQR: string;
+  gateWhiteLabel: string;
+  onChain: {
+    network: string;
+    token: string;
+    fullCurrType: string;
+    address: string;
+  };
+  message: string;
+}>;
+```
+
+### Example
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v1/user/wallet/deposit/crypto" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <YOUR_API_KEY>" \
+  --data '{
+    "token": "USDT",
+    "network": "ETH",
+    "amount": 10
+  }'
+```
+
+## GET `/v1/user/wallet/deposit/crypto/chains`
+
+Return available deposit chains for the currency.
+
+### Query type
+
+```ts
+interface DepositChainsQuery {
+  currency: string;
+}
+```
+
+### Response type
+
+```ts
+type DepositChainsResponse = Array<{
+  name: string;
+  explorer_url: string;
+  display_name: string;
+}>;
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/user/wallet/deposit/crypto/chains?currency=USDC" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+## GET `/v1/user/wallet/deposit/crypto/rates`
+
+Return deposit token rates and minimums. **Top-level partner key required.**
+
+### Response type
+
+```ts
+type DepositRatesResponse = ApiSuccess<{
+  baseUsdAmount: number;
+  feeMultiplier: number;
+  currencies: Array<{
+    token: string;
+    isStable: boolean;
+    minDepositUsd: number | null;
+    minDepositToken: number | null;
+    rate: {
+      baseUsdAmount: number;
+      grossTokenAmount: number;
+      netTokenAmount: number;
+      grossTokenPerUsd: number;
+      netTokenPerUsd: number;
+      feeRate: number;
+      feeMultiplier?: number;
+    } | null;
+    error?: 'RATE_UNAVAILABLE';
+    chains: Array<{
+      chain: string;
+      fullCurrType: string;
+      symbol: string;
+      explorer_url: string;
+      display_name: string;
+    }>;
+  }>;
+}>;
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/user/wallet/deposit/crypto/rates" \
+  --header "X-API-Key: <TOP_LEVEL_PARTNER_KEY>"
+```
+
+## POST `/v1/user/wallet/deposit/onramp/session`
+
+Create fiat-to-crypto onramp widget session.
+
+### Request type
+
+```ts
+interface OnrampSessionRequest {
+  coinId?: 54 | 116;
+  coinCode?: 'usdt' | 'usdc';
+  chainId?: 0 | 1 | 2 | 16;
+  network?: string;
+  fiatType: 12 | 20 | 21;
+  fiatAmount?: number;
+  coinAmount?: number;
+  type?: 1;
+  paymentMethod?: 1 | 2;
+  redirectUrl?: string | null;
+}
+```
+
+### Response type
+
+```ts
+type OnrampSessionResponse = ApiSuccess<{
+  depositId: string;
+  merchantRecognitionId: string;
+  widgetUrl: string;
+  quote: Record<string, unknown> | null;
+  message: string;
+}>;
+```
+
+### Example
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v1/user/wallet/deposit/onramp/session" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <YOUR_API_KEY>" \
+  --data '{
+    "coinCode": "usdc",
+    "fiatType": 12,
+    "redirectUrl": "https://merchant.example/checkout/complete",
+    "fiatAmount": 22,
+    "network": "bep20"
+  }'
+```
+
+## POST `/v1/user/wallet/deposit/onramp/quote`
+
+Get onramp quote without creating a deposit session.
+
+### Request type
+
+```ts
+interface OnrampQuoteRequest {
+  fiatAmount: number;
+  fiatType: 12 | 20 | 21;
+  type: 1;
+  coinCode: 'usdt' | 'usdc';
+  network: string;
+  countryCode?: string;
+}
+```
+
+### Response type
+
+```ts
+type OnrampQuoteResponse = ApiSuccess<Record<string, unknown>>;
+```
+
+### Example
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v1/user/wallet/deposit/onramp/quote" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <YOUR_API_KEY>" \
+  --data '{
+    "fiatAmount": 25,
+    "fiatType": 21,
+    "type": 1,
+    "coinCode": "usdc",
+    "network": "bep20",
+    "countryCode": "US"
+  }'
+```

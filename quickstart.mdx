@@ -1,0 +1,64 @@
+---
+title: "Quickstart"
+description: "Make your first authenticated call and place your first order with v2 endpoints."
+---
+
+## Prerequisites
+
+- A SkinShark partner API key
+- Base URL: `https://api.skinshark.gg`
+- Ability to send `X-API-Key` headers
+
+## 1. Check account profile
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/user" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+## 2. Search items (v2)
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v2/market/search?q=ak-47&start=1&end=20&sort=popularity" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+## 3. Fetch listings (v2)
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v2/market/listings?item=4a27ccaf8769fd11&page=1&delivery=normal" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+## 4. Buy an item (v2)
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v2/market/buy" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <YOUR_API_KEY>" \
+  --data '{
+    "itemId": "1494954737741336576",
+    "price": 0.01,
+    "market": "c5game",
+    "tradeUrl": "https://steamcommunity.com/tradeoffer/new/?partner=1872111350&token=Vw8qSy_0"
+  }'
+```
+
+## 5. Track execution and accounting
+
+Use these endpoints after purchase:
+
+- `GET /v1/user/orders`
+- `GET /v1/user/transactions`
+- `GET /v1/user/ledger`
+- `GET /v1/user/wallet`
+
+## 6. Enable webhooks
+
+Set up an HTTPS webhook endpoint and verify `x-skinshark-signature` on every event.
+
+Continue with [Webhooks](/guides/webhooks).

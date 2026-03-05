@@ -1,0 +1,278 @@
+---
+title: "Market API v2"
+description: "Preferred market endpoints for search, listings, and buying."
+---
+
+## GET `/v2/market/search`
+
+Search inventory with filters and fee-adjusted prices.
+
+### Query type
+
+```ts
+interface MarketSearchV2Query {
+  q?: string;
+  start?: number; // default: 1
+  end?: number; // default: 100
+  minPrice?: number;
+  maxPrice?: number;
+  rarity?: string;
+  team?: string;
+  wear?: string;
+  category?: string;
+  tags?: string;
+  paintIndex?: string;
+  weapon?: string;
+  itemType?: string;
+  sort?: 'abc' | 'priceAsc' | 'popularity' | 'priceDesc';
+}
+```
+
+### Response type
+
+```ts
+type MarketSearchV2Response = ApiSuccess<{
+  items: Array<{
+    id: string;
+    marketHashName: string;
+    type: string | null;
+    iconUrl: string | null;
+    price: number;
+    steamPrice: number | null;
+    exterior: string | null;
+    rarity: string | null;
+    collection: string | null;
+    color: string | null;
+    weapon: string | null;
+    sellingTotal: number;
+    popularity: number;
+  }>;
+  itemsCount: number;
+}>;
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v2/market/search?q=ak-47&weapon=AK-47&itemType=skin&rarity=Covert&start=1&end=20&sort=popularity" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+```json
+{
+  "requestId": "f0b42f66-32f6-4695-9a66-0b2bd9d6e3ad",
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "4a27ccaf8769fd11",
+        "marketHashName": "AK-47 | Neon Rider (Factory New)",
+        "type": "skin",
+        "iconUrl": "https://cdn.skinshark.gg/items/4a27ccaf8769fd11.png",
+        "price": 318.12,
+        "steamPrice": 312.65,
+        "exterior": "Factory New",
+        "rarity": "Covert",
+        "collection": "The Horizon Collection",
+        "color": "#eb4b4b",
+        "weapon": "AK-47",
+        "sellingTotal": 18,
+        "popularity": 942
+      }
+    ],
+    "itemsCount": 1
+  }
+}
+```
+
+## GET `/v2/market/listings`
+
+Fetch current listings for a single SkinShark item ID.
+
+### Query type
+
+```ts
+interface ListingsV2Query {
+  item: string; // 16-char hex item id
+  page?: number; // default: 1
+  delivery?: 'normal' | 'auto';
+}
+```
+
+### Response type
+
+```ts
+type ListingsV2Response = ApiSuccess<{
+  listings: ListingItemV2[];
+  totalSellCount: number;
+}>;
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v2/market/listings?item=4a27ccaf8769fd11&page=1&delivery=normal" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+```json
+{
+  "requestId": "1e0ee194-06d6-4218-8cce-599fc5cff8c9",
+  "success": true,
+  "data": {
+    "listings": [
+      {
+        "itemId": "4a27ccaf8769fd11",
+        "id": "1494954737741336576",
+        "marketHashName": "AK-47 | Neon Rider (Factory New)",
+        "type": "skin",
+        "iconUrl": "https://cdn.skinshark.gg/items/4a27ccaf8769fd11.png",
+        "price": 310.01,
+        "priceWithFee": 325.52,
+        "steamPrice": 312.65,
+        "delivery": "normal",
+        "market": "c5game",
+        "exterior": "Factory New",
+        "wear": 0.0288,
+        "paintSeed": 812,
+        "rarity": "Covert",
+        "collection": "The Horizon Collection",
+        "color": "#eb4b4b",
+        "stickers": [],
+        "charm": null
+      }
+    ],
+    "totalSellCount": 18
+  }
+}
+```
+
+## GET `/v2/market/search/suggestions`
+
+Autocomplete endpoint for market search input.
+
+### Query type
+
+```ts
+interface SearchSuggestionsV2Query {
+  q: string;
+}
+```
+
+### Response type
+
+```ts
+type SearchSuggestionsV2Response = ApiSuccess<{
+  items: Array<{
+    id: string;
+    marketHashName: string;
+    iconUrl: string | null;
+    rarity: string | null;
+    color: string | null;
+  }>;
+}>;
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v2/market/search/suggestions?q=ak-47" \
+  --header "X-API-Key: <YOUR_API_KEY>"
+```
+
+```json
+{
+  "requestId": "1985eaad-6ecf-4cb5-8f3e-cf702ed2de68",
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "4a27ccaf8769fd11",
+        "marketHashName": "AK-47 | Neon Rider (Factory New)",
+        "iconUrl": "https://cdn.skinshark.gg/items/4a27ccaf8769fd11.png",
+        "rarity": "Covert",
+        "color": "#eb4b4b"
+      }
+    ]
+  }
+}
+```
+
+## POST `/v2/market/buy`
+
+Place a purchase at exact current listing price.
+
+### Request type
+
+```ts
+interface BuyV2Request {
+  itemId: string; // numeric listing id
+  price: number; // base price without fee
+  market: 'c5game' | 'ecosteam';
+  tradeUrl?: string; // required for API-key users
+}
+```
+
+### Response type
+
+```ts
+type BuyV2Response = ApiSuccess<{
+  order: {
+    orderId?: string;
+    skinsharkOrderId: string;
+    status: string;
+    message?: string;
+  };
+  item: ListingItemV2;
+}>;
+```
+
+### Example
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v2/market/buy" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <YOUR_API_KEY>" \
+  --data '{
+    "itemId": "1494954737741336576",
+    "price": 0.01,
+    "market": "c5game",
+    "tradeUrl": "https://steamcommunity.com/tradeoffer/new/?partner=1872111350&token=Vw8qSy_0"
+  }'
+```
+
+```json
+{
+  "requestId": "c8c9118c-0f0e-4515-b8ac-73b788db53cf",
+  "success": true,
+  "data": {
+    "order": {
+      "orderId": "C5-59821943",
+      "skinsharkOrderId": "67cae2d892dd6c5ad60df96c",
+      "status": "SUCCESS"
+    },
+    "item": {
+      "itemId": "4a27ccaf8769fd11",
+      "id": "1494954737741336576",
+      "marketHashName": "AK-47 | Neon Rider (Factory New)",
+      "type": "skin",
+      "iconUrl": "https://cdn.skinshark.gg/items/4a27ccaf8769fd11.png",
+      "price": 0.01,
+      "priceWithFee": 0.02,
+      "steamPrice": 312.65,
+      "delivery": "normal",
+      "market": "c5game",
+      "exterior": "Factory New",
+      "rarity": "Covert",
+      "collection": "The Horizon Collection",
+      "color": "#eb4b4b",
+      "stickers": [],
+      "charm": null
+    }
+  }
+}
+```

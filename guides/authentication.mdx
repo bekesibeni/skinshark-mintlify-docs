@@ -1,0 +1,36 @@
+---
+title: "Authentication"
+description: "API key authentication model, partner key hierarchy, and access rules."
+---
+
+## Header
+
+Send your API key in every request:
+
+```http
+X-API-Key: <your_api_key>
+```
+
+## Key types
+
+### Top-level partner API key
+
+- Can access partner endpoints.
+- Can create child/sub-account API keys.
+- Can transfer balance to child accounts.
+
+### Child API key (sub-account)
+
+- Merchant-scoped key created under a top-level partner.
+- Cannot call top-level-only partner operations.
+- Can call regular trading, user, and wallet endpoints within its own account scope.
+
+## Access behavior
+
+- Endpoints marked top-level-only reject child keys.
+- Some partner market endpoints currently accept authenticated keys generally, but partner keys are the intended mode.
+- API key auth is the only supported integration auth mode.
+
+## Errors
+
+Invalid or missing credentials return `401` with a structured error payload.

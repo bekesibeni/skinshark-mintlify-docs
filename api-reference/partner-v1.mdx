@@ -1,0 +1,255 @@
+---
+title: "Partner API v1"
+description: "Partner administration and legacy partner market endpoints."
+---
+
+## POST `/v1/partner/users`
+
+Create (or fetch existing) child API key under a top-level partner.
+
+### Auth
+
+- Top-level partner API key required.
+
+### Request type
+
+```ts
+interface CreateSubAccountRequest {
+  email: string;
+  name?: string;
+  description?: string;
+}
+```
+
+### Response type
+
+```ts
+type CreateSubAccountResponse = ApiSuccess<{
+  apiKeyId: string;
+  apiKey?: string; // present when newly created
+  email: string;
+  name: string;
+  linkedUserId: string | null;
+  status: 'active' | 'suspended' | 'deleted';
+  message: string;
+}>;
+```
+
+### Example
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v1/partner/users" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <TOP_LEVEL_PARTNER_KEY>" \
+  --data '{
+    "email": "merchant-001@partner.example",
+    "name": "Merchant #001",
+    "description": "Storefront account"
+  }'
+```
+
+## POST `/v1/partner/transfers`
+
+Transfer balance from top-level partner to a child account.
+
+### Auth
+
+- Top-level partner API key required.
+
+### Request type
+
+```ts
+interface PartnerTransferRequest {
+  toEmail?: string;
+  toApiKeyId?: string;
+  amountCents: number;
+  idempotencyKey: string;
+}
+```
+
+### Response type
+
+```ts
+type PartnerTransferResponse = ApiSuccess<{
+  partnerApiKeyId?: string;
+  userApiKeyId?: string;
+  amountCents?: number;
+  message: string;
+}>;
+```
+
+### Example
+
+```bash
+curl --request POST \
+  --url "https://api.skinshark.gg/v1/partner/transfers" \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: <TOP_LEVEL_PARTNER_KEY>" \
+  --data '{
+    "toEmail": "merchant-001@partner.example",
+    "amountCents": 5000,
+    "idempotencyKey": "871d43ef-df3e-431a-a177-ca1f63a60a3b"
+  }'
+```
+
+### Notes
+
+- Exactly one of `toEmail` or `toApiKeyId` must be provided.
+- Reusing the same `idempotencyKey` returns an idempotent success.
+
+## GET `/v1/partner/stats`
+
+Partner-level order, volume, and revenue stats.
+
+### Auth
+
+- Top-level partner API key required.
+
+### Response type
+
+```ts
+type PartnerStatsResponse = ApiSuccess<{
+  orderAmount: number;
+  pendingOrderAmount: number;
+  volume: number;
+  pendingVolume: number;
+  partnerRevenue: number;
+  pendingPartnerRevenue: number;
+}>;
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/partner/stats" \
+  --header "X-API-Key: <TOP_LEVEL_PARTNER_KEY>"
+```
+
+## GET `/v1/partner/market-health`
+
+Operational health for c5/ecosteam workers and queues.
+
+### Auth
+
+- Top-level partner API key required.
+
+### Response type
+
+```ts
+type PartnerMarketHealthResponse = ApiSuccess<{
+  status: 'ok' | 'degraded' | 'down';
+  ts: number;
+  markets: {
+    c5: MarketHealthEntry;
+    ecosteam: MarketHealthEntry;
+  };
+  service: {
+    c5: boolean;
+    ecosteam: boolean;
+  };
+}>;
+
+interface MarketHealthEntry {
+  status: 'ok' | 'degraded' | 'down';
+  staleMs: number;
+  commonQueue: string;
+  commonConsumers: number;
+  workers: Array<{
+    workerId: string;
+    queue: string;
+    consumerCount: number;
+    heartbeat: {
+      ts: number;
+      ageMs: number;
+      balanceUsd: number | null;
+    } | null;
+    status: 'ok' | 'no-consumer' | 'no-heartbeat' | 'stale-heartbeat';
+  }>;
+}
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/partner/market-health" \
+  --header "X-API-Key: <TOP_LEVEL_PARTNER_KEY>"
+```
+
+## GET `/v1/partner/onramp/limitsMapping`
+
+### Auth
+
+- Partner API key required.
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/partner/onramp/limitsMapping" \
+  --header "X-API-Key: <PARTNER_KEY>"
+```
+
+## GET `/v1/partner/onramp/allCountryConfig`
+
+### Auth
+
+- Partner API key required.
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/partner/onramp/allCountryConfig" \
+  --header "X-API-Key: <PARTNER_KEY>"
+```
+
+## GET `/v1/partner/onramp/allConfigMapping`
+
+### Auth
+
+- Partner API key required.
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/partner/onramp/allConfigMapping" \
+  --header "X-API-Key: <PARTNER_KEY>"
+```
+
+## GET `/v1/partner/live/listings` (legacy)
+
+Legacy live listings endpoint. Prefer `GET /v2/partner/live/listings`.
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/partner/live/listings" \
+  --header "X-API-Key: <PARTNER_KEY>"
+```
+
+## GET `/v1/partner/listing-detail` (legacy)
+
+Legacy listing detail endpoint. Prefer `POST /v2/partner/listing-detail`.
+
+### Query type
+
+```ts
+interface ListingDetailLegacyQuery {
+  item: string; // 16-char id
+  listing: string;
+  market: 'c5' | 'eco' | 'ecosteam';
+}
+```
+
+### Example
+
+```bash
+curl --request GET \
+  --url "https://api.skinshark.gg/v1/partner/listing-detail?item=4a27ccaf8769fd11&listing=1482075074326503424&market=c5" \
+  --header "X-API-Key: <PARTNER_KEY>"
+```

@@ -1,0 +1,196 @@
+---
+title: "Data models"
+description: "Canonical request/response types used by partner-facing endpoints."
+---
+
+## Shared wrappers
+
+```ts
+export interface ApiSuccess<T> {
+  requestId: string;
+  success: true;
+  data: T;
+}
+
+export interface ApiError {
+  requestId: string;
+  success: false;
+  data: {
+    code: string;
+    message: string;
+    meta?: Record<string, unknown>;
+  };
+}
+
+export interface ValidationError {
+  requestId: string;
+  success: false;
+  error: {
+    code: 'VALIDATION_ERROR';
+    message: string;
+    meta: {
+      fieldErrors: Record<string, string>;
+    };
+  };
+}
+```
+
+## Listing model (v2)
+
+```ts
+export interface ListingItemV2 {
+  itemId: string | null;
+  id: string;
+  marketHashName: string;
+  type: string | null;
+  iconUrl: string | null;
+  price: number;
+  priceWithFee: number;
+  steamPrice: number | null;
+  delivery: 'auto' | 'fast' | 'normal';
+  market: 'c5game' | 'ecosteam' | null;
+  exterior: string | null;
+  wear?: number;
+  paintSeed?: number;
+  rarity: string | null;
+  collection: string | null;
+  color: string | null;
+  phase?: string;
+  fade?: string;
+  hardened?: string;
+  stickers: Array<{
+    name: string;
+    slot: number;
+    wear: number | null;
+    iconUrl: string | null;
+  }>;
+  charm: {
+    name: string;
+    pattern: string | null;
+    iconUrl: string | null;
+  } | null;
+}
+```
+
+## Ledger item
+
+```ts
+export interface LedgerItem {
+  id: string;
+  amount: number;
+  type: 'credit' | 'debit' | 'neutral';
+  source: string;
+  status: string;
+  details: Record<string, unknown> | null;
+  timestamp: number;
+}
+```
+
+## Webhook event
+
+```ts
+export type WebhookEventType = 'order.updated' | 'order.refunded';
+
+export interface SkinSharkWebhookEvent {
+  id: string;
+  type: WebhookEventType;
+  created: number;
+  data: OrderUpdatedData | OrderRefundedData;
+}
+
+export interface OrderUpdatedData {
+  id: string;
+  item: string;
+  itemId: string;
+  amount: number;
+  currency: 'USD';
+  status: {
+    code: 'INITIATED' | 'PENDING' | 'ACTIVE' | 'HOLD' | 'COMPLETED' | 'FAILED' | 'REVERTED';
+    label: string;
+  };
+  timestamp: number;
+  cancelType: number;
+  cancelReason: string;
+  settlementTime: string | null;
+  protectedCauser: number;
+}
+
+export interface OrderRefundedData {
+  id: string;
+  amount: number;
+  currency: 'USD';
+  reason: string;
+  protectedCauser: number | null;
+  settlementTime: string | null;
+  timestamp: number;
+}
+```
+
+## JSON schema snippets
+
+### `ApiSuccess<T>`
+
+```json
+{
+  "type": "object",
+  "required": ["requestId", "success", "data"],
+  "properties": {
+    "requestId": { "type": "string" },
+    "success": { "const": true },
+    "data": {}
+  }
+}
+```
+
+### `ApiError`
+
+```json
+{
+  "type": "object",
+  "required": ["requestId", "success", "data"],
+  "properties": {
+    "requestId": { "type": "string" },
+    "success": { "const": false },
+    "data": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "meta": { "type": "object" }
+      }
+    }
+  }
+}
+```
+
+### `ValidationError`
+
+```json
+{
+  "type": "object",
+  "required": ["requestId", "success", "error"],
+  "properties": {
+    "requestId": { "type": "string" },
+    "success": { "const": false },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "meta"],
+      "properties": {
+        "code": { "const": "VALIDATION_ERROR" },
+        "message": { "type": "string" },
+        "meta": {
+          "type": "object",
+          "required": ["fieldErrors"],
+          "properties": {
+            "fieldErrors": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```

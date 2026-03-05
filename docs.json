@@ -1,0 +1,98 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "SkinShark Partner API",
+  "description": "API documentation for SkinShark merchant and partner integrations.",
+  "colors": {
+    "primary": "#12C2A4",
+    "light": "#12C2A4",
+    "dark": "#0EA88D"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "index",
+              "quickstart",
+              "guides/authentication"
+            ]
+          },
+          {
+            "group": "Integration modes",
+            "pages": [
+              "integration/core-api",
+              "integration/full-platform"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "guides/webhooks",
+              "guides/sdk"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/data-models",
+              "reference/json-schemas",
+              "reference/errors",
+              "reference/rate-limits"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "v2 (preferred)",
+            "pages": [
+              "api-reference/market-v2",
+              "api-reference/partner-v2"
+            ]
+          },
+          {
+            "group": "v1 account and wallet",
+            "pages": [
+              "api-reference/user-v1",
+              "api-reference/wallet-v1"
+            ]
+          },
+          {
+            "group": "v1 partner platform",
+            "pages": [
+              "api-reference/partner-v1"
+            ]
+          },
+          {
+            "group": "v1 market legacy",
+            "pages": [
+              "api-reference/market-v1-legacy"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Postman",
+        "href": "https://api.skinshark.gg"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {}
+  }
+}

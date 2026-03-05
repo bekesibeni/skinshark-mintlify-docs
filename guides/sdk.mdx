@@ -1,0 +1,60 @@
+---
+title: "TypeScript SDK"
+description: "Use the official skinshark-sdk for typed endpoint wrappers and signature verification."
+---
+
+## Install
+
+```bash
+npm install github:bekesibeni/skinshark-sdk
+```
+
+## Initialize
+
+```ts
+import { SkinsharkSDK } from 'skinshark-sdk';
+
+const sdk = new SkinsharkSDK({
+  apiKey: process.env.SKINSHARK_API_KEY!,
+  apiSecret: process.env.SKINSHARK_WEBHOOK_SECRET!,
+  baseUrl: 'https://api.skinshark.gg'
+});
+```
+
+## Most-used methods
+
+### Market (v2)
+
+- `sdk.market.search(...)`
+- `sdk.market.getListings(...)`
+- `sdk.market.searchSuggestions(...)`
+- `sdk.market.buy(...)`
+
+### Partner
+
+- `sdk.partner.getLiveListings()` (v2)
+- `sdk.partner.getListingDetail(...)` (v2)
+- `sdk.partner.createSubuser(...)` (v1)
+- `sdk.partner.transferBalance(...)` (v1)
+- `sdk.partner.getStats()` (v1)
+- `sdk.partner.getMarketHealth()` (v1)
+
+### User/wallet (v1)
+
+- `sdk.user.getBalance()`
+- `sdk.user.getOrders()`
+- `sdk.user.getTransactions()`
+- `sdk.user.withdraw(...)`
+- `sdk.user.depositCrypto(...)`
+
+## Verify webhook signatures
+
+```ts
+const verification = sdk.verifySignature(signatureHeader, rawBodyBuffer, 300);
+if (!verification.isValid) throw new Error(verification.error);
+```
+
+## Notes
+
+- Backend remains the source of truth for exact payloads and error shapes.
+- SDK methods are wrappers around the endpoint set documented in this site.
