@@ -1,0 +1,166 @@
+---
+title: "WebSocket"
+description: "Per-sub-user real-time event stream for deposits and trades. Read-only, JWT-ticket authed."
+---
+
+The WebSocket endpoint pushes deposit and trade events for one sub-user
+in real time. It's the lowest-latency way to react to status changes and
+the easiest way to drive UI without polling.
+
+```http
+wss://api.skinshark.gg/ws?token=<wsToken>
+```
+
+For server-side durable delivery, use [Webhooks](/guides/webhooks)
+instead — WebSockets close on network blips; webhooks retry.
+
+## Authentication
+
+The WebSocket isn't authenticated by `api-key` (browsers can't send
+custom headers on `WebSocket` upgrades). Instead, mint a short-lived JWT
+ticket through the API, then pass it as a `?token=` query string.
+
+<Steps>
+  <Step title="Mint a ticket">
+    Call `POST /auth/ws-token` with `On-Behalf-Of` set to the sub-user
+    you want to subscribe as. Each ticket is bound to that one sub-user.
+
+    ```ts
+    const { token, expiresIn } = await api<{ token: string; expiresIn: string }>(
+      "/auth/ws-token",
+      { method: "POST" },
+      "user_42",
+    );
+    // token: short-lived JWT, ~1h
+    // expiresIn: "1h"
+    ```
+  </Step>
+  <Step title="Open the socket">
+    ```ts
+    const ws = new WebSocket(`wss://api.skinshark.gg/ws?token=${token}`);
+    ```
+
+    The server verifies the ticket on upgrade. Bad token → close code
+    `4001 Invalid token`.
+  </Step>
+  <Step title="Listen for the connected frame">
+    Immediately after upgrade, the server pushes:
+
+    ```json
+    {
+      "event": "connected",
+      "data": { "userId": "<uuid>" },
+      "ts": 1714678920000
+    }
+    ```
+  </Step>
+</Steps>
+
+## Protocol
+
+- **Read-only.** Sending any frame to the server closes the socket with
+  `4002 Read-only`. The protocol carries server pushes only.
+- **Heartbeats.** The server sends WS pings; respond with pongs to keep
+  the connection alive (most clients do this automatically).
+- **Frame shape.** Every push is `{ event, data, ts }` — `event` is a
+  string discriminator, `ts` is Unix epoch milliseconds.
+
+## Events
+
+```ts
+type WsEvent =
+  | { event: "connected"; data: { userId: string }; ts: number }
+  | DepositEvent
+  | TradeEvent
+  | { event: "system.notice"; data: { severity: "info" | "warning" | "critical"; message: string }; ts: number };
+
+type DepositEvent =
+  | { event: "deposit.transfer"; data: { fundingId: string; status: "pending"; transfer: { txHash: string; amount: number; chain: string } }; ts: number }
+  | { event: "deposit.completed"; data: { fundingId?: string; depositId?: string; status: "completed"; payAmountToken?: number; receiveAmountUsd?: number; completedAt: string }; ts: number }
+  | { event: "deposit.failed"; data: { fundingId?: string; depositId?: string; status: string; reason: string }; ts: number }
+  | { event: "deposit.refunded"; data: { fundingId: string; status: "refunded" }; ts: number }
+  | { event: "deposit.pending"; data: { depositId: string; chain: string; token: string; txHash: string; amountWei: string }; ts: number };
+
+type TradeEvent = {
+  event: `trade.${string}`;       // "trade.completed", "trade.failed", "trade.pending", etc.
+  data: Trade;
+  ts: number;
+};
+```
+
+### Discriminating deposits
+
+Gateway-hosted deposits (Gate Pay, on-ramp) and self-hosted EVM crypto
+share event names but carry different keys:
+
+| Event | Gateway | Self-hosted crypto |
+|---|---|---|
+| `deposit.completed` | has `fundingId`, `payAmountToken`, `receiveAmountUsd` | has `depositId`, `chain`, `token`, `txHash`, `amountWei`, `amountUsdCents`, `confirmations` |
+| `deposit.failed` | has `fundingId`, `status`, `reason` | has `depositId`, `chain`, `token`, `txHash`, `reason`, `confirmations` |
+
+```ts
+function isCryptoDeposit(e: { fundingId?: string; depositId?: string }): boolean {
+  return Boolean(e.depositId);
+}
+```
+
+### Trade events
+
+Fired on every status transition. The full trade payload is included so
+you can update your UI without a follow-up GET.
+
+```ts
+ws.addEventListener("message", (raw) => {
+  const event = JSON.parse(raw.data.toString()) as WsEvent;
+  if (event.event.startsWith("trade.")) {
+    const trade = event.data;
+    updateOrderStatus(trade.externalId, trade.status);
+  }
+});
+```
+
+## Close codes
+
+| Code | Reason | Cause |
+|---|---|---|
+| 4001 | Missing token | No `?token=` query string |
+| 4001 | Invalid token | Bad signature, expired, or wrong purpose |
+| 4002 | Read-only | Client sent any frame after upgrade |
+
+## Reconnection
+
+The server doesn't rotate tokens on disconnect; the same ticket is valid
+until it expires (~1h). On disconnect:
+
+```ts
+function connect(token: string): WebSocket {
+  const ws = new WebSocket(`wss://api.skinshark.gg/ws?token=${token}`);
+
+  ws.addEventListener("close", async (e) => {
+    if (e.code === 4001 || e.code === 4002) {
+      // 4001 = bad/expired token; mint a fresh one
+      const fresh = await api<{ token: string }>(
+        "/auth/ws-token",
+        { method: "POST" },
+        subUserId,
+      );
+      setTimeout(() => connect(fresh.token), 1000);
+      return;
+    }
+    // Network blip; reconnect with the same token
+    setTimeout(() => connect(token), Math.min(30000, attempt * 1000));
+  });
+
+  return ws;
+}
+```
+
+## One sub-user per socket
+
+A token is bound to the `On-Behalf-Of` sub-user it was minted with — the
+socket only delivers events for that user. To watch multiple sub-users,
+mint a token per sub-user and open one socket each. There's no
+multi-subscription pattern on a single connection.
+
+For server-side aggregation across many sub-users, prefer
+[Webhooks](/guides/webhooks).

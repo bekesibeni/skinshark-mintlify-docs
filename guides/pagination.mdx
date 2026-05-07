@@ -1,0 +1,113 @@
+---
+title: "Pagination"
+description: "Two styles, used per endpoint based on how the data is queried. Pick the right one and don't mix."
+---
+
+The API uses two pagination styles. Each endpoint commits to one — the
+choice reflects the underlying query, not a preference. Don't try to pass
+both.
+
+## Page-based
+
+Used for stable, count-bounded lists where you want to jump to a page or
+show a total count.
+
+```http
+GET /merchant/users?page=2&limit=25
+```
+
+Response:
+
+```ts
+interface PageResult<T> {
+  users: T[];        // or `items` — depends on endpoint
+  total: number;     // total matching across all pages
+  page: number;      // echoed
+  limit: number;     // echoed
+  totalPages: number;
+}
+```
+
+Endpoints that use this:
+
+- `GET /merchant/users` (returns `users: …`)
+- `GET /market/search` (returns `items: …`)
+
+## Cursor-based
+
+Used for trade and ledger lists where rows arrive over time and you want
+to walk backwards from "now" without total counts.
+
+```http
+GET /merchant/trades?cursor=01h0...&limit=25
+```
+
+Response:
+
+```ts
+interface CursorResult<T> {
+  items: T[];
+  nextCursor: string | null;  // null on the last page
+}
+```
+
+Send `nextCursor` from the previous response as `cursor` to fetch the next
+page. Stop when it comes back `null`.
+
+```ts
+let cursor: string | undefined;
+const all: Trade[] = [];
+
+do {
+  const page = await api<{ items: Trade[]; nextCursor: string | null }>(
+    `/merchant/trades?limit=100${cursor ? `&cursor=${cursor}` : ""}`,
+  );
+  all.push(...page.items);
+  cursor = page.nextCursor ?? undefined;
+} while (cursor);
+```
+
+Endpoints that use this:
+
+- `GET /merchant/trades`, `GET /merchant/users/{id}/trades`
+- `GET /merchant/ledger`, `GET /merchant/users/{id}/ledger`
+- `GET /user/wallet/transactions`
+- `GET /market/transactions`
+- WebSocket delivery list (admin only — not in this doc)
+
+## Why two styles
+
+| Property | Page-based | Cursor-based |
+|---|---|---|
+| Total count | ✅ Returned | ❌ Not available |
+| Stable across new rows | ❌ Drifts | ✅ Stable |
+| Random access (page 17) | ✅ | ❌ |
+| Cost on big tables | O(skip) | O(1) |
+
+Trade lists grow continuously; using a page index would mean a new trade
+arriving between requests pushes everything down by one. The cursor is a
+trade ID — it doesn't drift.
+
+## Limits
+
+All pagination endpoints accept `limit` between 1 and 100. The default is
+25 unless documented otherwise. Send a sane upper bound; don't paginate
+the whole list in one request unless the dataset is small.
+
+```ts
+// Common pattern: walk pages until you have enough
+async function findCompletedTrade(externalId: string): Promise<Trade | null> {
+  let cursor: string | undefined;
+  for (let i = 0; i < 10; i++) {  // bound the search
+    const page = await api<{ items: Trade[]; nextCursor: string | null }>(
+      `/merchant/trades?status=completed&externalId=${externalId}&limit=50` +
+        (cursor ? `&cursor=${cursor}` : ""),
+    );
+    const hit = page.items.find((t) => t.externalId === externalId);
+    if (hit) return hit;
+    if (!page.nextCursor) return null;
+    cursor = page.nextCursor;
+  }
+  throw new Error("trade not found in last 500 rows");
+}
+```

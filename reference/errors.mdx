@@ -1,61 +1,253 @@
 ---
 title: "Errors"
-description: "Error formats, status codes, and retry guidance."
+description: "Full error table — code, key, HTTP status, and meaning. Branch on `key`, never on `message`."
 ---
 
-## Error formats
+Every error response carries a numeric `code` and a stable string `key`.
+`message` is human-readable and may change; **always branch on `key`**.
 
-### Standard error
-
-```json
+```ts
 {
-  "requestId": "44ecb0a4-8fa2-4ef0-b823-b57a21ea2e6b",
+  "requestId": "01900b...",
   "success": false,
-  "data": {
-    "code": "INSUFFICIENT_FUNDS",
-    "message": "Partner account balance is insufficient"
-  }
+  "error": { "code": 1700, "key": "INSUFFICIENT_BALANCE", "message": "..." }
 }
 ```
 
-### Validation error
+See [Error handling](/guides/error-handling) for retry strategy.
+
+## HTTP status mapping
+
+| Status | When |
+|---|---|
+| `400` | Generic bad request (`BAD_REQUEST`). |
+| `401` | Missing or invalid auth, including expired tokens. |
+| `403` | Authenticated but not permitted (suspended, IP not allowed, calling a dashboard-only route). |
+| `404` | Resource doesn't exist. |
+| `409` | Resource conflict (idempotency replay, duplicate email, etc.). |
+| `410` | Gone (a one-shot 2FA code was already used). |
+| `422` | Validation or business-rule failure. |
+| `429` | Rate limited. |
+| `500` | Internal error. |
+| `502` | Upstream gateway error (Discord OAuth, marketplace partner, crypto RPC). |
+| `503` | Service unavailable (no marketplace workers healthy, FX unavailable, maintenance). |
+| `504` | Marketplace worker did not respond in time. |
+
+## General (1001–1002)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1001 | `VALIDATION_FAILED` | 422 | Request body / query failed Zod schema validation. The error includes `meta.details`. |
+| 1002 | `BAD_REQUEST` | 400 | Generic malformed request (e.g. unknown query combo). |
+
+## Auth (1100–1107)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1100 | `UNAUTHORIZED` | 401 | No credentials. |
+| 1101 | `INVALID_CREDENTIALS` | 401 | (Dashboard JWT) bad email/password. |
+| 1102 | `INVALID_TOKEN` | 401 | (Dashboard JWT) bad signature, expired, or wrong purpose. |
+| 1103 | `MISSING_BEARER` | 401 | (Dashboard) no `Authorization: Bearer` header. |
+| 1104 | `MISSING_API_KEY` | 401 | No `api-key` header. |
+| 1105 | `INVALID_API_KEY` | 401 | Key not found. |
+| 1106 | `API_KEY_REVOKED` | 401 | Key was revoked in dashboard. |
+| 1107 | `INVALID_REFRESH_TOKEN` | 401 | (Dashboard) refresh token bad/expired. |
+
+## 2FA (1200–1208)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1200 | `TWOFA_REQUIRED` | 401 | Login requires 2FA challenge completion. |
+| 1201 | `INVALID_2FA_CODE` | 422 | Bad TOTP / email / recovery code. |
+| 1202 | `TWOFA_ALREADY_ENABLED` | 409 | Cannot start TOTP setup; already enabled. |
+| 1203 | `TWOFA_NOT_ENABLED` | 422 | Operation requires 2FA, which isn't on. |
+| 1204 | `TWOFA_NOT_STARTED` | 422 | TOTP setup not in progress. |
+| 1205 | `TWOFA_USE_TOTP` | 422 | Email channel offered but account uses TOTP. |
+| 1206 | `TWOFA_USE_EMAIL` | 422 | TOTP channel offered but account uses email. |
+| 1207 | `TWOFA_CODE_USED` | 410 | Recovery code already consumed. |
+| 1208 | `TWOFA_PROVIDE_CODE` | 422 | Provide a TOTP or recovery code. |
+
+## Account (1300–1323)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1300 | `FORBIDDEN` | 403 | Authenticated but not permitted. Most common: API-key calling a dashboard-only route, or `On-Behalf-Of` set on `/merchant/*`. |
+| 1301 | `ACCOUNT_SUSPENDED` | 403 | Merchant or sub-user account suspended. |
+| 1302 | `ACCOUNT_DELETED` | 403 | Account is soft-deleted. |
+| 1303 | `ACCOUNT_LOCKED` | 403 | Temporarily locked (e.g. failed login bursts). |
+| 1304 | `EMAIL_NOT_VERIFIED` | 403 | Operation requires a verified email. |
+| 1305 | `API_KEY_IP_DENIED` | 403 | Source IP not on the key's allowlist. |
+| 1306 | `USER_NOT_OWNED` | 403 | Acting on a user that doesn't belong to your merchant. |
+| 1307 | `INVALID_INVITE` | 422 | Invite token bad/expired. |
+| 1308 | `INVITE_EMAIL_MISMATCH` | 422 | Invite is for a different email. |
+| 1309 | `INVALID_VERIFICATION` | 422 | Email-verification code bad/expired. |
+| 1323 | `CAPTCHA_FAILED` | 403 | CAPTCHA verification failed. |
+
+## User settings (1310–1322)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1310 | `WRONG_PASSWORD` | 422 | Current password incorrect. |
+| 1311 | `RESTORE_INVALID` | 422 | Invalid/expired restore token. |
+| 1312 | `ACCOUNT_NOT_DELETED` | 422 | Restore called on a non-deleted account. |
+| 1313 | `NO_PASSWORD_SET` | 422 | Account has no password (OAuth-only). |
+| 1314 | `SAME_EMAIL` | 422 | New email matches current. |
+| 1315 | `TRADEURL_LIMIT` | 422 | Maximum number of saved trade URLs reached. |
+| 1316 | `TRADEURL_ALREADY_ADDED` | 409 | Trade URL already saved. |
+| 1317 | `TRADEURL_NOT_FOUND` | 404 | Trade URL ID doesn't exist. |
+| 1318 | `DISCORD_ALREADY_LINKED` | 409 | Account already linked to a Discord. |
+| 1319 | `DISCORD_NOT_LINKED` | 422 | Unlink called on an unlinked account. |
+| 1320 | `DISCORD_OAUTH_FAILED` | 502 | Discord OAuth handshake failed. |
+| 1321 | `TRADEURL_INVALID_TOKEN` | 422 | Trade URL invalid, expired, or inventory private. |
+| 1322 | `TRADEURL_ESCROW` | 422 | Account has trade hold (escrow) enabled. |
+
+## Not found (1400–1401)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1400 | `NOT_FOUND` | 404 | Generic resource not found. |
+| 1401 | `USER_NOT_FOUND` | 404 | Sub-user not owned by this merchant (or doesn't exist — same response, no enumeration). |
+
+## Conflict (1500–1501)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1500 | `CONFLICT` | 409 | Generic uniqueness violation. |
+| 1501 | `EMAIL_TAKEN` | 409 | Email already registered. |
+
+## Rate limit (1600)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1600 | `RATE_LIMITED` | 429 | Honor `Retry-After`. See [Rate limits](/reference/rate-limits). |
+
+## Wallet (1700–1712)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1700 | `INSUFFICIENT_BALANCE` | 422 | Wallet balance < required. |
+| 1701 | `WALLET_SUSPENDED` | 403 | Wallet is suspended (e.g. ledger drift). |
+| 1702 | `WALLET_NOT_FOUND` | 404 | Wallet doesn't exist for that user/type. |
+| 1703 | `INVALID_CURRENCY` | 422 | Currency value outside the supported set. |
+| 1704 | `IDEMPOTENCY_CONFLICT` | 409 | Same `Idempotency-Key`, different request body. |
+| 1705 | `IDEMPOTENCY_KEY_REQUIRED` | 422 | `Idempotency-Key` header missing on `/fund`. |
+| 1706 | `INVALID_AMOUNT` | 422 | Amount ≤ 0 or wrong format. |
+| 1710 | `TRANSFER_CURRENCY_MISMATCH` | 422 | Source and destination wallets in different currencies. |
+| 1711 | `MERCHANT_MUST_BE_USD` | 422 | Merchant accounts must use USD. |
+| 1712 | `FX_RATE_UNAVAILABLE` | 503 | FX rate unavailable — retry shortly. |
+
+## Deposits (1750–1758)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1750 | `DEPOSIT_NOT_FOUND` | 404 | Unknown deposit ID. |
+| 1751 | `DEPOSIT_NOT_CANCELLABLE` | 422 | Only `initiated` deposits can be cancelled. |
+| 1752 | `INVALID_QUOTE` | 422 | Quote token bad or expired. Re-quote. |
+| 1753 | `INVALID_CHAIN` | 422 | Unsupported chain for this currency. |
+| 1754 | `INVALID_DEPOSIT_CURRENCY` | 422 | Unsupported deposit currency. |
+| 1755 | `DEPOSIT_MIN_AMOUNT` | 422 | Below provider minimum. |
+| 1756 | `INVALID_SIGNATURE` | 401 | Gateway callback signature failed. |
+| 1757 | `GATEWAY_ERROR` | 502 | Payment gateway returned an error. |
+| 1758 | `DEPOSIT_NOT_RESUMABLE` | 422 | Deposit reached a terminal state. |
+
+## Crypto gateway (1770–1783)
+
+Self-hosted EVM deposit/withdrawal/transfer.
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1770 | `CRYPTO_NOT_CONFIGURED` | 503 | Crypto gateway not configured. |
+| 1771 | `CRYPTO_CHAIN_NOT_SUPPORTED` | 422 | Chain not enabled. |
+| 1772 | `CRYPTO_CHAIN_PAUSED` | 503 | Admin paused the chain. |
+| 1773 | `CRYPTO_TOKEN_NOT_SUPPORTED` | 422 | Token not enabled on this chain. |
+| 1774 | `CRYPTO_ADDRESS_NOT_FOUND` | 404 | No deposit address generated for user yet. |
+| 1775 | `CRYPTO_MIN_AMOUNT` | 422 | Below minimum. |
+| 1776 | `CRYPTO_INVALID_DESTINATION` | 422 | Destination address invalid. |
+| 1777 | `CRYPTO_WITHDRAWAL_NOT_FOUND` | 404 | Withdrawal not found. |
+| 1778 | `CRYPTO_WITHDRAWAL_INVALID_STATE` | 422 | Withdrawal not in a valid state for this action. |
+| 1780 | `CRYPTO_WEBHOOK_INVALID` | 401 | Webhook signature bad. |
+| 1781 | `CRYPTO_INVALID_FEE_BPS` | 422 | `cryptoFeeBps` out of range (0–5000). |
+| 1782 | `CRYPTO_SELF_TRANSFER` | 422 | Cannot transfer to your own wallet. |
+| 1783 | `CRYPTO_RECIPIENT_WALLET_MISSING` | 422 | Recipient has no wallet for this currency. |
+
+## Merchant / sub-users (1802–1822)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1802 | `INVALID_ADMIN_OP` | 422 | Invalid admin/merchant operation. |
+| 1810 | `APIKEY_LIMIT_REACHED` | 422 | Maximum active API keys reached. |
+| 1811 | `APIKEY_ALREADY_REVOKED` | 422 | API key already revoked. |
+| 1812 | `SECRET_ALREADY_EXISTS` | 409 | Active webhook secret already exists. |
+| 1813 | `SECRET_NOT_FOUND` | 404 | Webhook secret not found. |
+| 1814 | `SECRET_ALREADY_REVOKED` | 422 | Webhook secret already revoked. |
+| 1815 | `WEBHOOK_TEST_FAILED` | 422 | Test ping didn't return 2xx. |
+| 1816 | `WEBHOOK_NOT_FOUND` | 404 | No active callback URL configured (or revoked / disabled). |
+| 1817 | `WEBHOOK_DELIVERY_NOT_FOUND` | 404 | Delivery ID not yours / doesn't exist. |
+| 1818 | `WEBHOOK_URL_INVALID` | 422 | URL fails SSRF / scheme checks. |
+| 1819 | `SUB_USER_SUSPENDED` | 422 | Sub-user is suspended; can't fund or buy. |
+| 1820 | `SUB_USER_DELETED` | 422 | Sub-user is deleted; reactivate not possible. |
+| 1821 | `INVALID_FEE_BPS` | 422 | `feeBps` out of range (0–5000). |
+| 1822 | `SUB_USER_HAS_BALANCE` | 422 | Can't delete: balance is non-zero. |
+
+## Marketplace (1850–1864)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1850 | `MARKET_UNAVAILABLE` | 503 | No marketplace workers healthy. Retry once after 30s. |
+| 1851 | `MARKET_TIMEOUT` | 504 | Marketplace worker did not respond in time. |
+| 1852 | `ORDER_NOT_FOUND` | 404 | Trade ID or external ID doesn't exist in your scope. |
+| 1854 | `PRICE_MISMATCH` | 409 | Listing price drifted above your `maxPrice`. |
+| 1855 | `TRADEURL_REQUIRED` | 422 | Sub-user has no primary Steam trade URL set. |
+| 1856 | `PURCHASE_FAILED` | 502 | Marketplace partner rejected the purchase. |
+| 1857 | `CALLBACK_INVALID` | 401 | Marketplace callback signature failed. |
+| 1858 | `LISTING_NOT_FOUND` | 404 | Listing sold / removed since you fetched it. |
+| 1859 | `LISTING_DETAIL_FAILED` | 502 | Failed to fetch listing details from upstream. |
+| 1860 | `WORKER_LOW_BALANCE` | 503 | Marketplace worker has insufficient balance to settle. |
+| 1861 | `PURCHASE_RETRY_TIMEOUT` | 504 | Purchase retried but never settled. |
+| 1862 | `PRICE_BELOW_MINIMUM` | 422 | Quick-buy `maxPrice` below current minimum listing price. |
+| 1863 | `TRADE_NOT_CANCELLABLE` | 409 | Trade not in a cancellable state. |
+| 1864 | `TRADE_CANCEL_TOO_SOON` | 422 | Order must be at least 30 minutes old to cancel. |
+
+## Internal (1900–1901)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1900 | `INTERNAL` | 500 | Catch-all server error. Retry. |
+| 1901 | `MAINTENANCE_MODE` | 503 | Service down for maintenance. |
+
+## Validation error shape
+
+When `key === "VALIDATION_FAILED"`, the error includes per-field details:
 
 ```json
 {
-  "requestId": "44ecb0a4-8fa2-4ef0-b823-b57a21ea2e6b",
+  "requestId": "01900b...",
   "success": false,
   "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "One or more fields failed validation.",
+    "code": 1001,
+    "key": "VALIDATION_FAILED",
+    "message": "Validation failed",
     "meta": {
-      "fieldErrors": {
-        "amountCents": "amountCents must be at least 1"
-      }
+      "details": [
+        { "path": ["amount"], "message": "Invalid decimal amount" },
+        { "path": ["items", 0, "maxPrice"], "message": "String must contain at most 2 decimal places" }
+      ]
     }
   }
 }
 ```
 
-## Common status codes
+```ts
+type ValidationError = {
+  code: 1001;
+  key: "VALIDATION_FAILED";
+  message: string;
+  meta: { details: Array<{ path: (string | number)[]; message: string }> };
+};
+```
 
-- `200`: Success
-- `201`: Resource created
-- `202`: Accepted/queued operation
-- `400`: Invalid request state or business condition
-- `401`: Missing/invalid API key
-- `402`: Insufficient funds or billing issue
-- `403`: Forbidden (often top-level key required)
-- `404`: Not found
-- `409`: Duplicate resource
-- `415`: Unsupported content type
-- `422`: Validation error
-- `429`: Rate limited
-- `500`: Internal server error
-- `502`: Upstream market/onramp service error
-- `503`: Market health degraded/down
+## When in doubt
 
-## Retry guidance
-
-- Safe to retry: reads (`GET`), webhook handlers (idempotent handlers), and transfer requests with the same `idempotencyKey`.
-- Do not blind-retry buys after network timeouts; reconcile first with `GET /v1/user/orders`.
-- For `429`, respect `Retry-After` and the rate-limit headers.
+If you hit a code or key not on this page, it's documented at the
+endpoint level in the [API reference](/api-reference) — every operation
+lists its specific error keys in the response section.

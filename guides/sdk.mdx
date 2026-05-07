@@ -1,60 +1,127 @@
 ---
-title: "TypeScript SDK"
-description: "Use the official skinshark-sdk for typed endpoint wrappers and signature verification."
+title: "TypeScript types"
+description: "Generate types from the OpenAPI spec for full IntelliSense. No SDK required."
 ---
 
-## Install
+You don't need an SDK to use the API — `fetch` plus the typed wrapper
+from [Authentication](/guides/authentication) covers everything. For
+fully typed responses with zero hand-maintenance, generate a `paths`
+type from the OpenAPI spec.
+
+## Generate types from the spec
+
+The OpenAPI spec is the source of truth. Generate a `paths` type with
+[`openapi-typescript`](https://github.com/openapi-ts/openapi-typescript)
+and you get full IntelliSense over every endpoint.
 
 ```bash
-npm install github:bekesibeni/skinshark-sdk
+npm install -D openapi-typescript
+npx openapi-typescript \
+  https://raw.githubusercontent.com/skinshark/skinshark-api/main/docs/skinshark-merchant-api-openapi.yaml \
+  -o src/skinshark-types.ts
 ```
 
-## Initialize
+```ts
+import type { paths } from "./skinshark-types";
+
+type CreateSubUserBody =
+  paths["/merchant/users"]["post"]["requestBody"]["content"]["application/json"];
+
+type CreateSubUserResponse =
+  paths["/merchant/users"]["post"]["responses"]["201"]["content"]["application/json"]["data"];
+
+type ListTradesQuery = NonNullable<
+  paths["/merchant/trades"]["get"]["parameters"]["query"]
+>;
+```
+
+## A typed fetch helper
+
+Pair it with a tiny `fetch` wrapper that infers the `data` shape from the
+operation's success response:
 
 ```ts
-import { SkinsharkSDK } from 'skinshark-sdk';
+import type { paths } from "./skinshark-types";
 
-const sdk = new SkinsharkSDK({
-  apiKey: process.env.SKINSHARK_API_KEY!,
-  apiSecret: process.env.SKINSHARK_WEBHOOK_SECRET!,
-  baseUrl: 'https://api.skinshark.gg'
+type Method = "get" | "post" | "patch" | "delete";
+
+type SuccessData<P extends keyof paths, M extends Method> =
+  paths[P][M] extends { responses: { 200: { content: { "application/json": { data: infer D } } } } }
+    ? D
+    : paths[P][M] extends { responses: { 201: { content: { "application/json": { data: infer D } } } } }
+      ? D
+      : never;
+
+export async function call<P extends keyof paths, M extends Method>(
+  method: M,
+  path: P,
+  init?: { body?: unknown; onBehalfOf?: string; query?: Record<string, string>; idempotencyKey?: string },
+): Promise<SuccessData<P, M>> {
+  const qs = init?.query
+    ? "?" + new URLSearchParams(init.query).toString()
+    : "";
+
+  const headers: Record<string, string> = {
+    "api-key": process.env.SKINSHARK_API_KEY!,
+    "content-type": "application/json",
+  };
+  if (init?.onBehalfOf) headers["on-behalf-of"] = init.onBehalfOf;
+  if (init?.idempotencyKey) headers["idempotency-key"] = init.idempotencyKey;
+
+  const res = await fetch(`https://api.skinshark.gg${path}${qs}`, {
+    method: method.toUpperCase(),
+    headers,
+    body: init?.body ? JSON.stringify(init.body) : undefined,
+  });
+
+  const env = await res.json();
+  if (!env.success) {
+    const e = env.error;
+    throw new SkinSharkError(env.requestId, e.code, e.key, e.message);
+  }
+  return env.data;
+}
+```
+
+```ts
+const profile = await call("get", "/merchant");
+//    ^? { id: string; email: string; merchantFeeBps: number; ... }
+
+const sub = await call("post", "/merchant/users", {
+  body: { email: "alice@example.com", externalId: "user_42" },
 });
+//    ^? { id: string; externalId: string | null; ... }
+
+const trades = await call("get", "/merchant/trades", {
+  query: { status: "completed", limit: "50" },
+});
+//    ^? { items: Trade[]; nextCursor: string | null }
 ```
 
-## Most-used methods
+This is the highest-leverage option: zero runtime dependencies, types
+drift automatically as the spec evolves, and the wrapper is ~30 lines.
+Pin the spec to a git tag if you want stable types between releases.
 
-### Market (v2)
+## Types only, no client
 
-- `sdk.market.search(...)`
-- `sdk.market.getListings(...)`
-- `sdk.market.searchSuggestions(...)`
-- `sdk.market.buy(...)`
-
-### Partner
-
-- `sdk.partner.getLiveListings()` (v2)
-- `sdk.partner.getListingDetail(...)` (v2)
-- `sdk.partner.createSubuser(...)` (v1)
-- `sdk.partner.transferBalance(...)` (v1)
-- `sdk.partner.getStats()` (v1)
-- `sdk.partner.getMarketHealth()` (v1)
-
-### User/wallet (v1)
-
-- `sdk.user.getBalance()`
-- `sdk.user.getOrders()`
-- `sdk.user.getTransactions()`
-- `sdk.user.withdraw(...)`
-- `sdk.user.depositCrypto(...)`
-
-## Verify webhook signatures
+If you already have an HTTP client you're happy with, skip the wrapper
+and just consume the generated `paths` type:
 
 ```ts
-const verification = sdk.verifySignature(signatureHeader, rawBodyBuffer, 300);
-if (!verification.isValid) throw new Error(verification.error);
+import type { paths } from "./skinshark-types";
+
+type Trade = paths["/merchant/trades/{id}"]["get"]["responses"][200]["content"]["application/json"]["data"];
+type FundBody = paths["/merchant/users/{id}/fund"]["post"]["requestBody"]["content"]["application/json"];
 ```
 
-## Notes
+For shorter aliases, hand-roll the most-used types in
+[Data models](/reference/data-models) (or copy them from there) — those
+mirror the spec but read better in code.
 
-- Backend remains the source of truth for exact payloads and error shapes.
-- SDK methods are wrappers around the endpoint set documented in this site.
+## Webhook signature verification
+
+Drop the `verifySkinSharkSignature` helper from
+[Webhooks](/guides/webhooks#signature-verification) into your codebase.
+It's ~30 lines, has no dependencies beyond `node:crypto`, and follows
+the [Standard Webhooks](https://www.standardwebhooks.com/) scheme — so
+any Standard Webhooks library on the npm side works just as well.

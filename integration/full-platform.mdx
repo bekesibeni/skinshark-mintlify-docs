@@ -1,162 +1,265 @@
 ---
 title: "Full Platform"
-description: "Partner reseller model: merchants integrate your API and serve your services to their own end users."
+description: "One merchant account with isolated sub-users for each of your end customers. The recommended pattern for SaaS reselling."
 ---
 
-## What this model is
+Full Platform is the multi-tenant model. You hold one merchant API key.
+Every end customer of yours gets a sub-user under it: their own wallet,
+their own trade history, their own Steam trade URLs. Money flows from your
+merchant treasury to sub-users via internal transfers, or directly to a
+sub-user via deposit.
 
-Full Platform is the right model when **your partners are merchants** and each merchant uses your integration to provide SkinShark-powered functionality to that merchant's own end users.
+## Mental model
 
-This is not a marketplace model where many merchants share one operating account.
+<Frame>
+  ```
+  ┌────────────────────────────────┐
+  │       Your backend              │
+  │     (one API key)               │
+  └───────────────┬────────────────┘
+                  │   api-key
+                  ▼
+  ┌────────────────────────────────┐
+  │       Merchant account          │
+  │      (your treasury)            │
+  └─────┬──────────┬──────────┬────┘
+        │  fund    │  fund    │  fund
+        ▼          ▼          ▼
+  ┌──────────┐  ┌──────────┐  ┌──────────┐
+  │ user_42  │  │ user_43  │  │ user_44  │
+  │ wallet   │  │ wallet   │  │ wallet   │
+  └──────────┘  └──────────┘  └──────────┘
+  ```
+</Frame>
 
-In Full Platform:
+Acting as a sub-user from your single merchant key is one header:
 
-- You operate one **top-level partner account**.
-- Each merchant gets its own **child API key**.
-- Each child key represents that merchant's isolated account context.
-- The merchant then uses that child key to run end-user flows (browse, buy, wallet, orders, ledger).
+```http
+On-Behalf-Of: user_42
+```
 
-## Why businesses use Full Platform
+See [Acting on behalf of a sub-user](/guides/on-behalf-of).
 
-Businesses choose this when they are selling infrastructure/services to merchants, and merchants are selling to end users.
+## When this fits
 
-Typical reasons:
+- You're building a product **on top of** SkinShark and reselling to your
+  own users.
+- Each user needs their own balance, trade history, and Steam connection.
+- You want chargeback / dispute isolation per user.
+- You want per-user reporting in the SkinShark dashboard.
 
-- You need clean merchant-level separation.
-- You want controlled balance allocation per merchant.
-- You need merchant-level reporting and operational controls.
-- You want to onboard/suspend merchants without impacting others.
+## Provisioning
 
-## Roles and responsibilities
+Create one sub-user per end customer when they sign up. Use your own
+internal user ID as `externalId` so you never have to persist the
+SkinShark UUID.
 
-### You (platform partner)
+```ts
+async function onboardCustomer(internalUserId: string, email: string) {
+  return api<{ id: string; externalId: string; currency: "USD" | "EUR" }>(
+    "/merchant/users",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        externalId: internalUserId,
+      }),
+    },
+  );
+}
+```
 
-- Own and secure the top-level partner key.
-- Onboard merchants and issue child keys.
-- Fund merchant accounts via partner transfers.
-- Monitor merchant operations and market health.
+<Note>
+`POST /merchant/users` is API-key-auth only. Provisioning happens
+server-to-server, never from a dashboard session.
+</Note>
 
-### Merchant client
+## Funding pattern
 
-- Uses the child key you issued.
-- Implements end-user flows with market/user/wallet endpoints.
-- Handles end-user UX, support, and local business logic.
+There are two ways to put money in a sub-user's wallet:
 
-### End user (merchant customer)
+### (a) Internal transfer from merchant treasury
 
-- Interacts only with the merchant's product.
-- Does not manage SkinShark partner primitives directly.
+You hold balance centrally and dispense it as customers need it. Idempotent.
 
-## How it works end-to-end
+```ts
+import { randomUUID } from "node:crypto";
 
-1. You onboard a merchant.
-2. You create a child key using `POST /v1/partner/users`.
-3. You transfer initial balance to that child account using `POST /v1/partner/transfers`.
-4. Merchant integrates trading and wallet endpoints with its child key.
-5. Merchant serves end users through its own frontend/backend.
-6. You and the merchant monitor orders, funds, and health.
+async function fundOnCheckout(internalUserId: string, amount: string, checkoutId: string) {
+  return api<{ transactionId: string; idempotent: boolean }>(
+    `/merchant/users/${internalUserId}/fund`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": `checkout:${checkoutId}` },
+      body: JSON.stringify({ amount }),
+    },
+  );
+}
+```
 
-## Endpoint scope in Full Platform
+### (b) Direct deposit from the customer
 
-In Full Platform, you should expect to implement **almost the entire partner collection**.
+The customer pays SkinShark directly via Gate Pay / on-ramp / crypto. Run
+under `On-Behalf-Of` so the deposit credits the sub-user.
 
-This includes:
+```ts
+async function quoteCryptoDeposit(internalUserId: string, amount: number) {
+  return api<{
+    chains: Record<string, { feeCents: number; receiveAmount: number; gasGwei: number }>;
+  }>(
+    "/user/wallet/deposit/crypto/quote",
+    {
+      method: "POST",
+      body: JSON.stringify({ token: "USDT", amount }),
+    },
+    internalUserId,
+  );
+}
+```
 
-- v2 market (primary)
-- v1 market (legacy + item detail helpers)
-- v1 user and wallet
-- v1 and v2 partner endpoints
-- crypto and onramp deposit flows
+Most platforms use (a) for in-product purchases and (b) for top-ups
+initiated by the customer.
 
-Rule of thumb: if an endpoint is in your partner collection, Full Platform usually needs it either now or very soon.
+## Buy flow
 
-### Merchant provisioning and treasury (you)
+Always tag with both the sub-user (`On-Behalf-Of`) and your own checkout
+ID (`externalId`). The first scopes wallet/trade-URL/history. The second
+makes retries idempotent and reconciliation trivial.
 
-- `POST /v1/partner/users`
-- `POST /v1/partner/transfers`
-- `GET /v1/partner/stats`
-- `GET /v1/partner/market-health`
-- `GET /v1/partner/onramp/limitsMapping`
-- `GET /v1/partner/onramp/allCountryConfig`
-- `GET /v1/partner/onramp/allConfigMapping`
+```ts
+async function buyForCustomer(input: {
+  internalUserId: string;
+  checkoutId: string;
+  listingId: string;
+  maxPrice: string;
+}) {
+  return api<{ id: string; status: string; totalPrice: number }>(
+    "/market/buy",
+    {
+      method: "POST",
+      headers: { "on-behalf-of": input.internalUserId },
+      body: JSON.stringify({
+        items: [{ listingId: input.listingId, maxPrice: input.maxPrice }],
+        externalId: input.checkoutId,
+      }),
+    },
+  );
+}
+```
 
-### Merchant runtime operations (merchant child key)
+## Reading customer state
 
-#### Market and item discovery
+| Question | Endpoint |
+|---|---|
+| What's this customer's balance? | `GET /merchant/users/{id}/wallet` |
+| Their trade history? | `GET /merchant/users/{id}/trades` |
+| Their full ledger? | `GET /merchant/users/{id}/ledger` |
+| Cross-customer aggregate? | `GET /merchant/stats?from=&to=` |
+| All recent trades? | `GET /merchant/trades?cursor=` |
+| Top GMV customers this month? | `GET /merchant/stats` → `bySubUser` |
 
-- `GET /v2/market/search`
-- `GET /v2/market/search/suggestions`
-- `GET /v2/market/listings`
-- `POST /v2/market/buy`
-- `GET /v2/partner/live/listings`
-- `POST /v2/partner/listing-detail`
+Notice these are all on the **merchant** prefix — no `On-Behalf-Of`
+needed because the merchant is reading their own scope. `On-Behalf-Of` is
+for *acting as* a sub-user (buys, deposits), not reading their data.
 
-#### Legacy market compatibility and item endpoints
+## Suspension and offboarding
 
-- `GET /v1/market/listings`
-- `GET /v1/market/search`
-- `GET /v1/market/search/suggestions`
-- `POST /v1/market/buy`
-- `GET /v1/market/item/{id}`
-- `GET /v1/market/items`
-- `GET /v1/market/item/{id}/overview` (top-level partner key required)
+```ts
+// Suspend (read-only — login + buy blocked)
+await api(`/merchant/users/${internalUserId}/suspend`, { method: "POST" });
 
-#### Account, orders, and accounting
+// Reactivate
+await api(`/merchant/users/${internalUserId}/reactivate`, { method: "POST" });
 
-- `GET /v1/user`
-- `GET /v1/user/orders`
-- `GET /v1/user/transactions`
-- `GET /v1/user/transactions/stats`
-- `GET /v1/user/fees`
-- `GET /v1/user/ledger`
-- `GET /v1/user/wallet`
+// Soft-delete (status=deleted, wallet closed)
+await api(`/merchant/users/${internalUserId}`, { method: "DELETE" });
+```
 
-#### Wallet funding and payout
+Suspension is reversible; deletion is not. After deletion, the wallet's
+balance must be zero — withdraw or sweep first.
 
-- `POST /v1/user/wallet/withdraw`
-- `GET /v1/user/wallet/withdraw/fees`
-- `POST /v1/user/wallet/deposit/crypto`
-- `GET /v1/user/wallet/deposit/crypto/chains`
-- `GET /v1/user/wallet/deposit/crypto/rates` (top-level partner key required)
-- `POST /v1/user/wallet/deposit/onramp/session`
-- `POST /v1/user/wallet/deposit/onramp/quote`
-- `POST /v1/user/wallet/{depositId}/cancel`
+## Treasury and fees
 
-#### Partner live market legacy support
+Your merchant has two wallets:
 
-- `GET /v1/partner/live/listings`
-- `GET /v1/partner/listing-detail`
+- **`spot`** — what you fund customers from, what direct merchant trades
+  debit.
+- **`earnings`** — credited at trade settlement when your `merchantFeeBps`
+  > 0. This is your cut on customer purchases.
 
-## Recommended auth split
+```ts
+const merchant = await api<{
+  wallets: {
+    spot: { currency: string; balance: number };
+    earnings: { currency: string; balance: number };
+  };
+}>("/merchant");
+```
 
-- Use the **top-level partner key** for merchant provisioning, partner treasury transfers, platform monitoring, and top-level-only endpoints.
-- Use **merchant child keys** for merchant runtime flows (market, buy, user, wallet, orders, ledger, deposits, withdrawals).
+Read fees with `GET /merchant/fees`. Fee changes are dashboard-only — the
+API exposes them read-only so you can render them in your UI without
+giving an automated client the power to change them.
 
-## Funding and risk control pattern
+## Reconciliation pattern
 
-Recommended operational pattern:
+Nightly job, in pseudocode:
 
-1. Keep most capital in top-level partner treasury.
-2. Push working balance to merchants as needed.
-3. Use idempotent transfers (`idempotencyKey`) for safe retries.
-4. Reconcile merchant activity regularly via ledger and orders.
+```ts
+async function nightly() {
+  const since = startOfYesterdayISO();
+  const until = startOfTodayISO();
 
-This reduces blast radius and keeps controls centralized while allowing merchant autonomy.
+  // 1. Aggregate stats
+  const stats = await api<{
+    totals: { gmv: number; feesEarned: number; tradeCount: number };
+    bySubUser: Array<{ externalId: string; gmv: number }>;
+  }>(`/merchant/stats?from=${since}&to=${until}`);
 
-## Common mistakes to avoid
+  // 2. Walk all trades that completed in the window for full ledger
+  let cursor: string | undefined;
+  const trades = [];
+  do {
+    const page = await api<{
+      items: Array<{ id: string; externalId: string | null; settledAt?: string }>;
+      nextCursor: string | null;
+    }>(
+      `/merchant/trades?status=completed&from=${since}&to=${until}&limit=100` +
+        (cursor ? `&cursor=${cursor}` : ""),
+    );
+    trades.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
 
-- Treating Full Platform as one shared account model.
-- Reusing one child key across multiple merchants.
-- Skipping transfer idempotency.
-- Not correlating incidents with `requestId`.
-- Mixing merchant operational logs without tenant isolation.
+  // 3. Match against your own order table by externalId
+  for (const t of trades) {
+    if (!t.externalId) continue;
+    await markCheckoutSettled(t.externalId, t.settledAt);
+  }
+}
+```
 
-## Should you choose Full Platform?
+## Common mistakes
 
-Use Full Platform if:
-
-- You sell your integration to merchant clients.
-- Merchant account isolation is required.
-- You need merchant-level funding and controls.
-
-If you only run one central operating account and do not need merchant isolation, use [Core API](/integration/core-api).
+<AccordionGroup>
+  <Accordion title="Reusing one externalId across customers">
+    `externalId` is unique per `(merchantId, userId)` for users and per
+    `(userId, externalId)` for trades. Don't recycle values across
+    customers — pick something globally unique to your platform.
+  </Accordion>
+  <Accordion title="Forgetting On-Behalf-Of on /market/buy">
+    The buy succeeds, but it buys *for the merchant*, not the customer.
+    See [Acting on behalf of](/guides/on-behalf-of#mistakes-to-watch-for)
+    for the defensive pattern.
+  </Accordion>
+  <Accordion title="Skipping idempotency on /fund">
+    Network retries that don't carry the same `Idempotency-Key` will
+    double-fund. The header is required — the API rejects calls without
+    it — but make sure your retry loop reuses the same key, not a fresh
+    UUID each attempt.
+  </Accordion>
+  <Accordion title="Treating suspension like deletion">
+    Suspending a sub-user freezes them; their wallet balance and trade
+    history are intact. Use `DELETE` only when you mean it: it's
+    irreversible and requires a zero balance.
+  </Accordion>
+</AccordionGroup>

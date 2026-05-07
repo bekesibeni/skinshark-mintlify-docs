@@ -1,0 +1,147 @@
+---
+title: "Response envelope"
+description: "Every response is wrapped. Here's the exact shape and how to handle it once in your client."
+---
+
+Every JSON response from the API ships in the same envelope. Your client
+should unwrap it once and let the rest of your code work with the inner
+data.
+
+## Shape
+
+<Tabs>
+  <Tab title="Success">
+    ```ts
+    interface SuccessEnvelope<T> {
+      requestId: string;       // UUIDv7
+      success: true;
+      data: T;                 // shape varies per endpoint
+    }
+    ```
+
+    ```json
+    {
+      "requestId": "01900b3f-1ad0-7ab1-9d8a-7b2f54e1d14c",
+      "success": true,
+      "data": {
+        "id": "01h0...",
+        "email": "alice@example.com"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Error">
+    ```ts
+    interface ErrorEnvelope {
+      requestId: string;
+      success: false;
+      error: {
+        code: number;          // numeric error code
+        key: string;           // stable string key (use this for branching)
+        message: string;       // human-readable
+      };
+    }
+    ```
+
+    ```json
+    {
+      "requestId": "01900b3f-...",
+      "success": false,
+      "error": {
+        "code": 1700,
+        "key": "INSUFFICIENT_BALANCE",
+        "message": "Insufficient balance"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+The OpenAPI spec describes the inner `data` shape only — the envelope is
+always there.
+
+## requestId
+
+Always present, on success and error. UUIDv7 format. Log it on every
+request so support requests can be traced end-to-end.
+
+```ts
+console.error({ requestId: body.requestId, key: body.error.key }, "API call failed");
+```
+
+## Branching on errors
+
+Always branch on `error.key`, never on `error.message`. The message is
+human-readable and may change; the key is stable.
+
+```ts
+async function fund(subUserId: string, amount: string) {
+  try {
+    return await api("/merchant/users/" + subUserId + "/fund", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    });
+  } catch (err) {
+    if (err instanceof SkinSharkError) {
+      switch (err.key) {
+        case "INSUFFICIENT_BALANCE":
+          return notifyOps("merchant balance below threshold");
+        case "TRANSFER_CURRENCY_MISMATCH":
+          throw new BadRequest("sub-user wallet currency differs from merchant");
+        case "IDEMPOTENCY_KEY_REQUIRED":
+          throw new BadRequest("missing Idempotency-Key header");
+      }
+    }
+    throw err;
+  }
+}
+```
+
+## A reusable client
+
+Define `SkinSharkError` once and unwrap there. The rest of your code never
+touches the envelope.
+
+```ts
+export class SkinSharkError extends Error {
+  constructor(
+    public requestId: string,
+    public code: number,
+    public key: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SkinSharkError";
+  }
+}
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  onBehalfOf?: string,
+): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("api-key", process.env.SKINSHARK_API_KEY!);
+  if (init.body) headers.set("content-type", "application/json");
+  if (onBehalfOf) headers.set("on-behalf-of", onBehalfOf);
+
+  const res = await fetch("https://api.skinshark.gg" + path, { ...init, headers });
+  const body = await res.json();
+
+  if (!body.success) {
+    throw new SkinSharkError(body.requestId, body.error.code, body.error.key, body.error.message);
+  }
+  return body.data as T;
+}
+```
+
+## HTTP status vs envelope
+
+Both are set on every response:
+
+- `2xx` ↔ `success: true`
+- `4xx` / `5xx` ↔ `success: false`
+
+If you read the body, the envelope is authoritative. If you only have the
+status code (e.g. logs), `4xx` ≠ retry, `5xx` = transient. See
+[Error handling](/guides/error-handling) for retry strategy.

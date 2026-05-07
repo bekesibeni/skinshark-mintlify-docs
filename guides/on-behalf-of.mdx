@@ -1,0 +1,148 @@
+---
+title: "Acting on behalf of a sub-user"
+description: "The On-Behalf-Of header, the merchant/sub-user model, and how routes resolve based on whether you set it."
+---
+
+SkinShark gives every merchant the ability to provision **sub-users** —
+isolated accounts under one merchant key. Each sub-user has its own wallet,
+own Steam trade URLs, own trade history. From your end users' perspective,
+the merchant is invisible; from the SkinShark side, every action is
+attributable to a specific sub-user.
+
+The bridge between your merchant API key and any one sub-user is a single
+header.
+
+## The header
+
+```http
+On-Behalf-Of: <subUserId | externalId>
+```
+
+The value can be:
+
+- The sub-user's UUID (returned by `POST /merchant/users`), or
+- The `externalId` you assigned when creating them.
+
+Both resolve to the same sub-user. UUIDs are stable; external IDs are yours
+to choose. Most teams set `externalId` to their internal user ID
+(`user_42`, `acme_customer_8129`) and never persist the SkinShark UUID.
+
+## Where the header applies
+
+| Route prefix | `On-Behalf-Of` |
+|---|---|
+| `/merchant/*` | **Rejected.** Sub-users don't hold the merchant role, so the call fails with `FORBIDDEN`. |
+| `/user/*` | Optional — sets the calling sub-user. |
+| `/market/*` | Optional — sets the calling sub-user. |
+| `/auth/ws-token`, `/ws` | Optional — scopes the WebSocket token. |
+
+Without the header on a sub-user-context route, the call runs **as the
+merchant itself**. That's intentional: it lets the merchant trade for its
+own account when needed.
+
+## Examples
+
+<Tabs>
+  <Tab title="Buy for a sub-user">
+    The buy debits `user_42`'s wallet, uses their primary Steam trade URL,
+    and the resulting trade shows up under their history.
+
+    ```ts
+    await api("/market/buy", {
+      method: "POST",
+      headers: { "on-behalf-of": "user_42" },
+      body: JSON.stringify({ items: [/* … */] }),
+    });
+    ```
+  </Tab>
+  <Tab title="Buy for the merchant">
+    No `On-Behalf-Of` header → the merchant is the buyer. Their spot wallet
+    is debited, their primary trade URL is used.
+
+    ```ts
+    await api("/market/buy", {
+      method: "POST",
+      body: JSON.stringify({ items: [/* … */] }),
+    });
+    ```
+  </Tab>
+  <Tab title="List a sub-user's trades">
+    There are two valid ways to list a sub-user's trades:
+
+    ```ts
+    // (a) Merchant-context endpoint, filter by sub-user
+    await api(`/merchant/users/${userId}/trades?limit=25`);
+
+    // (b) Sub-user-context endpoint, with the header
+    await api(
+      "/market/transactions?limit=25",
+      {},
+      userId,
+    );
+    ```
+
+    Both are scoped to the same trades. Pick (a) for cross-sub-user
+    aggregation in your dashboards; pick (b) when you're already in the
+    sub-user's session/context.
+  </Tab>
+</Tabs>
+
+## Resolving the value
+
+The server resolves both UUID and `externalId` against `parentId = your
+merchant`. A UUID that belongs to a *different* merchant returns
+`USER_NOT_FOUND` — never `FORBIDDEN` — so other merchants' UUIDs can't be
+enumerated through error responses.
+
+```json
+{
+  "requestId": "01900b...",
+  "success": false,
+  "error": {
+    "code": 1401,
+    "key": "USER_NOT_FOUND",
+    "message": "User not found"
+  }
+}
+```
+
+## Mistakes to watch for
+
+<AccordionGroup>
+  <Accordion title="Sending On-Behalf-Of on a /merchant/* route">
+    The `requireMerchant` guard checks the *resolved* role. Sub-users don't
+    have the merchant role, so the call returns `FORBIDDEN` with code 1300.
+    Drop the header for merchant-context routes (or just don't send it on
+    that path).
+  </Accordion>
+  <Accordion title="Forgetting On-Behalf-Of on /market/buy">
+    The buy succeeds — but it buys *for the merchant*. If you wanted to buy
+    for a customer, you'll see the listing in your merchant trade history,
+    not theirs, and the merchant's wallet was debited.
+
+    Defensive pattern: always set `On-Behalf-Of` when handling a customer
+    request, never derive intent from absence:
+    ```ts
+    if (!subUserExternalId) throw new Error("missing customer id");
+    return api(path, init, subUserExternalId);
+    ```
+  </Accordion>
+  <Accordion title="Letting end users supply the externalId">
+    `externalId` is a server-side trust boundary. If your client lets a
+    user pass an arbitrary ID and you forward it as `On-Behalf-Of`, you've
+    just given that user the ability to act as any of your sub-users.
+    Always derive the value from your own session/auth, not request input.
+  </Accordion>
+</AccordionGroup>
+
+## Suspended sub-users
+
+If a sub-user is suspended (via `POST /merchant/users/{id}/suspend`), every
+`On-Behalf-Of` resolution to that user returns:
+
+```json
+{ "code": 1301, "key": "ACCOUNT_SUSPENDED", "message": "Account is suspended" }
+```
+
+Trades, deposits, and balance reads all fail with this. Reactivate with
+`POST /merchant/users/{id}/reactivate`.

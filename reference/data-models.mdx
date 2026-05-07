@@ -1,196 +1,579 @@
 ---
 title: "Data models"
-description: "Canonical request/response types used by partner-facing endpoints."
+description: "TypeScript types for every shape returned by the API. Generated equivalents are available via openapi-typescript."
 ---
 
-## Shared wrappers
+These types mirror the OpenAPI `data` shapes — what's inside `body.data`
+on a successful envelope. Generate them with `openapi-typescript`
+([TypeScript types guide](/guides/sdk)) for hands-off updates, or copy
+the snippets below for ad-hoc use.
+
+## Enums
 
 ```ts
-export interface ApiSuccess<T> {
+type Currency = "USD" | "EUR";
+
+type Role = "user" | "merchant" | "admin";
+
+type UserStatus = "active" | "suspended" | "deleted";
+
+type WalletType = "spot" | "earnings";
+
+type WalletStatus = "active" | "suspended" | "closed";
+
+type TradeStatus =
+  | "initiated"
+  | "pending"
+  | "active"
+  | "hold"
+  | "completed"
+  | "failed"
+  | "reverted";
+
+// Returned by the trade endpoints, uppercase.
+type TradeStatusUpper = Uppercase<TradeStatus>;
+
+type TradeType = "buy" | "sell";
+
+type DepositStatus =
+  | "initiated"
+  | "pending"
+  | "completed"
+  | "partial"
+  | "expired"
+  | "cancelled"
+  | "refunded"
+  | "failed";
+
+type DepositMethod = "gatepay" | "onramp" | "crypto";
+
+type DepositCurrency = "USDT" | "USDC" | "DAI" | "BTC" | "ETH" | "SOL";
+
+type OnrampPayCurrency = "USD" | "EUR" | "GBP";
+
+type CryptoEvmChain = "ethereum" | "base" | "arbitrum" | "optimism" | "bsc";
+
+type CryptoNativeToken = "USDT" | "USDC" | "NATIVE";
+
+type TwoFactorMethod = "email" | "totp";
+```
+
+## Envelope
+
+```ts
+interface SuccessEnvelope<T> {
   requestId: string;
   success: true;
   data: T;
 }
 
-export interface ApiError {
+interface ErrorEnvelope {
   requestId: string;
   success: false;
-  data: {
-    code: string;
+  error: {
+    code: number;
+    key: string;
     message: string;
     meta?: Record<string, unknown>;
   };
 }
 
-export interface ValidationError {
-  requestId: string;
-  success: false;
-  error: {
-    code: 'VALIDATION_ERROR';
-    message: string;
-    meta: {
-      fieldErrors: Record<string, string>;
-    };
+type ApiEnvelope<T> = SuccessEnvelope<T> | ErrorEnvelope;
+```
+
+## Merchant context
+
+```ts
+interface MerchantProfile {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  country: string | null;
+  roles: Role[];
+  twoFactorEnabled: boolean;
+  twoFactorMethod: TwoFactorMethod | null;
+  feeBps: number;             // house fee on merchant's own buys
+  merchantFeeBps: number;     // merchant's cut on sub-user trades
+  childDefaultFeeBps: number | null;
+  wallets: {
+    spot: { currency: string; balance: number } | null;
+    earnings: { currency: string; balance: number } | null;
   };
+  createdAt: string;
+}
+
+interface FeesResponse {
+  merchantFeeBps: number;
+  childDefaultFeeBps: number | null;
+  globalDefaultFeeBps: number;
+  effectiveChildFeeBps: number;
+}
+
+interface MerchantStats {
+  totals: {
+    tradeCount: number;
+    gmv: number;
+    gmvCents: string;
+    feesEarnedCents: string;
+    feesEarned: number;
+    spotBalance: number;
+    earningsBalance: number;
+    currency: Currency | null;
+  };
+  bySubUser: Array<{
+    subUserId: string;
+    email: string | null;
+    externalId: string | null;
+    tradeCount: number;
+    gmvCents: string;
+    gmv: number;
+    balance: number;
+    feesContributedCents: string;
+  }>;
+  byStatus: Partial<Record<TradeStatus, number>>;
+}
+
+interface MerchantWallet {
+  walletId: string;
+  type: WalletType;
+  currency: Currency;
+  balance: number;
 }
 ```
 
-## Listing model (v2)
+## Sub-users
 
 ```ts
-export interface ListingItemV2 {
-  itemId: string | null;
+interface SubUserListItem {
   id: string;
-  marketHashName: string;
+  email: string | null;
+  steamId: string | null;
+  externalId: string | null;
+  status: UserStatus;
+  feeBps: number | null;
+  currency: Currency | null;
+  balance: number;
+  createdAt: string;
+}
+
+interface CreateSubUserBody {
+  email?: string;
+  steamId?: string;            // SteamID64
+  externalId?: string;
+  currency?: Currency;
+}
+
+interface CreateSubUserResponse {
+  id: string;
+  email: string | null;
+  steamId: string | null;
+  externalId: string | null;
+  status: UserStatus;
+  feeBps: number | null;
+  createdAt: string;
+  currency: Currency;
+}
+
+interface SubUserResponse {
+  id: string;
+  email: string | null;
+  steamId: string | null;
+  externalId: string | null;
+  status: UserStatus;
+  feeBps: number | null;
+  createdAt: string;
+  wallets: Array<{
+    type: WalletType;
+    status: WalletStatus;
+    currency: Currency | null;
+    balance: number;
+  }>;
+}
+
+interface FundBody {
+  amount: string;              // decimal, e.g. "25.00"
+}
+
+interface FundResponse {
+  transactionId: string;
+  idempotent: boolean;
+}
+```
+
+## Wallet & ledger
+
+```ts
+interface WalletBalance {
+  currency: Currency;
+  balance: number;
+}
+
+interface TransactionItem {
+  id: string;
+  type: string;                // "deposit_credit" | "trade_payment" | ...
+  description: string;
+  status: "posted" | "reversed";
+  amount: number;              // signed: + = credit, − = debit
+  occurredAt: string;
+  externalRef: string | null;
+}
+
+interface TransactionHistory {
+  transactions: TransactionItem[];
+  nextCursor: string | null;
+}
+```
+
+## Trades
+
+```ts
+interface TradeItem {
+  id: string;
+  name: string | null;
+  marketHashName: string | null;
   type: string | null;
   iconUrl: string | null;
   price: number;
-  priceWithFee: number;
-  steamPrice: number | null;
-  delivery: 'auto' | 'fast' | 'normal';
-  market: 'c5game' | 'ecosteam' | null;
-  exterior: string | null;
-  wear?: number;
-  paintSeed?: number;
-  rarity: string | null;
-  collection: string | null;
-  color: string | null;
+  exterior?: string;
+  rarity?: string;
+  color?: string;
   phase?: string;
-  fade?: string;
-  hardened?: string;
-  stickers: Array<{
+  wear?: string;
+  paintSeed?: number;
+  stickers?: Array<{
     name: string;
     slot: number;
-    wear: number | null;
-    iconUrl: string | null;
+    wear: number;
+    iconUrl: string;
   }>;
-  charm: {
-    name: string;
-    pattern: string | null;
-    iconUrl: string | null;
-  } | null;
-}
-```
-
-## Ledger item
-
-```ts
-export interface LedgerItem {
-  id: string;
-  amount: number;
-  type: 'credit' | 'debit' | 'neutral';
-  source: string;
-  status: string;
-  details: Record<string, unknown> | null;
-  timestamp: number;
-}
-```
-
-## Webhook event
-
-```ts
-export type WebhookEventType = 'order.updated' | 'order.refunded';
-
-export interface SkinSharkWebhookEvent {
-  id: string;
-  type: WebhookEventType;
-  created: number;
-  data: OrderUpdatedData | OrderRefundedData;
+  charm?: { name: string; pattern?: string; iconUrl: string };
+  delivery?: string;
+  status: TradeStatusUpper;
+  tradable: boolean;
+  error?: string;
 }
 
-export interface OrderUpdatedData {
+interface Trade {
   id: string;
-  item: string;
+  type: "BUY";
+  userId: string;
+  steamId: string;
+  tradeUrl: string;
+  offerID?: string;
+  externalId?: string;
+  status: TradeStatusUpper;
+  game: string;                // "730"
+  items: TradeItem[];
+  summary: { total: number; completed: number; failed: number };
+  totalPrice: number;
+  currency: Currency;
+  holdEndDate?: string;
+  settledAt?: string;
+  revertedBy?: "SUPPLIER" | "USER";
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface MerchantTradeListResponse {
+  items: Trade[];
+  nextCursor: string | null;
+}
+
+interface BuyItem {
+  listingId: string;
+  maxPrice: string;            // decimal string
+}
+
+interface BuyBody {
+  items: BuyItem[];            // 1–10
+  tradeUrl?: string;
+  externalId?: string;
+}
+
+interface BuyResponse {
+  id: string;
+  status: TradeStatusUpper;
+  itemCount: number;
+  totalPrice: number;
+  createdAt: string;
+}
+
+interface QuickBuyBody {
   itemId: string;
-  amount: number;
-  currency: 'USD';
-  status: {
-    code: 'INITIATED' | 'PENDING' | 'ACTIVE' | 'HOLD' | 'COMPLETED' | 'FAILED' | 'REVERTED';
-    label: string;
-  };
-  timestamp: number;
-  cancelType: number;
-  cancelReason: string;
-  settlementTime: string | null;
-  protectedCauser: number;
+  maxPrice: string;
+  amount: number;              // 1–200
+  delivery: "auto" | "manual";
+  tradeUrl?: string;
+  externalId?: string;
 }
 
-export interface OrderRefundedData {
+interface QuickBuyResponse {
   id: string;
+  status: TradeStatusUpper;
+  requestedCount: number;
+  itemCount: number;
+  totalPrice: number;
+  createdAt: string;
+}
+
+interface CancelItemResponse {
+  ok: true;
+  itemId: string;
+  status: "cancelled" | "failed";
+}
+```
+
+## Catalog & listings
+
+```ts
+interface SuggestionItem {
+  id: string;
+  marketHashName: string;
+  iconUrl: string;
+  rarity?: string;
+  rarityColor?: string;
+  itemType?: string;
+}
+
+interface SearchResultItem {
+  id: string;
+  name: string;
+  marketHashName: string;
+  itemType?: string;
+  iconUrl?: string;
+  weapon?: string;
+  wear?: string;
+  rarity?: string;
+  rarityColor?: string;
+  category?: "Normal" | "StatTrak" | "Souvenir";
+  collection?: string;
+  floatRange?: [number, number];
+  price?: number;
+  listingsCount?: number;
+  steamPrice?: number;
+}
+
+interface SearchResponse {
+  items: SearchResultItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+interface MarketListing {
+  id: string;
+  marketHashName: string;
+  name: string;
+  type: string;
+  iconUrl: string;
+  price: number;
+  referencePrice?: number;
+  exterior?: string;
+  rarity?: string;
+  collection?: string;
+  color?: string;
+  wear?: string | null;
+  paintSeed?: number | null;
+  doppler?: { status: number; name: string; paintIndex: number };
+  fade?: { percentage: number };
+  hardened?: { status: number; name: string };
+  stickers?: Array<{
+    name: string;
+    marketHashName?: string;
+    slot: number;
+    wear: number;
+    iconUrl: string;
+  }>;
+  charm?: {
+    name: string;
+    marketHashName?: string;
+    pattern?: string;
+    iconUrl: string;
+  };
+  inspectUrl?: string;
+  delivery?: string;
+}
+```
+
+## Deposits
+
+```ts
+// Gate Pay
+interface DepositChainsResponse {
+  currencies: Array<{
+    currency: DepositCurrency;
+    chains: string[];
+    isStable: boolean;
+    minDepositUsd: number;
+  }>;
+}
+
+interface DepositQuoteBody {
+  currency: DepositCurrency;
+  amount: string;              // decimal USD
+}
+
+interface DepositQuoteResponse {
+  token: DepositCurrency;
+  currency: Currency;
+  payAmountToken: number;
+  receiveAmountUsd: number;
+  receiveAmount: number;
+  fee: number;
+  exchangeRate: number;
+  quoteToken: string;
+  expiresIn: string;           // "5m"
+}
+
+interface CreateDepositBody {
+  quoteToken: string;
+  chain: string;
+}
+
+interface CreateDepositResponse {
+  fundingId: string;
+  status: DepositStatus;
+  currency: Currency;
+  payAmountToken: number;
+  receiveAmountUsd: number;
+  receiveAmount: number;
+  exchangeRate: number;
+  fee: number;
+  expireTime: number | null;
+  whitelabelUrl: string | null;
+  onChain: { network: string; token: DepositCurrency; address: string };
+}
+
+// On-ramp (card)
+interface OnrampQuoteBody {
+  payAmount?: number;
+  receiveAmount?: number;
+  payCurrency: OnrampPayCurrency;
+}
+
+interface OnrampSessionResponse {
+  fundingId: string;
+  status: "initiated" | "completed" | "failed";
+  currency: Currency;
+  payAmount: number;
+  receiveAmount: number;
+  receiveAmountUsd: number;
+  payCurrency: OnrampPayCurrency;
+  exchangeRate: number;
+  whitelabelUrl: string;
+}
+
+// Self-hosted EVM crypto
+interface CryptoAddressResponse {
+  address: string;             // 0x...
+  chains: CryptoEvmChain[];
+  tokens: CryptoNativeToken[];
+}
+
+interface CryptoQuoteBody {
+  token: "USDT" | "USDC";
+  amount: number;              // ≤ 10,000,000
+}
+
+interface CryptoQuoteResponse {
+  token: string;
   amount: number;
-  currency: 'USD';
-  reason: string;
-  protectedCauser: number | null;
-  settlementTime: string | null;
-  timestamp: number;
+  walletCurrency: Currency;
+  exchangeRate: number;
+  feeBps: number;
+  chains: Record<CryptoEvmChain, {
+    feeCents: number;
+    receiveAmountUsd: number;
+    receiveAmount: number;
+    gasGwei: number;
+  }>;
+}
+
+interface CancelDepositResponse {
+  depositId: string;
+  status: DepositStatus;
+}
+
+interface ResumeDepositResponse {
+  fundingId: string;
+  status: DepositStatus;
+  method: DepositMethod;
+  currency: Currency;
+  amount: number;
+  whitelabelUrl: string | null;
+  onChain: { network: string; token: string; address: string } | null;
 }
 ```
 
-## JSON schema snippets
+## Sub-user profile & trade URLs
 
-### `ApiSuccess<T>`
+```ts
+interface UserProfile {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  country: string | null;
+  roles: Role[];
+  twoFactorEnabled: boolean;
+  twoFactorMethod: TwoFactorMethod | null;
+  steam: {
+    steamId: string;
+    personaName: string | null;
+    avatarUrl: string | null;
+    profileUrl: string | null;
+    tradeUrl: string;
+  } | null;
+  discord: {
+    discordId: string;
+    username: string;
+    avatar: string | null;
+  } | null;
+  wallet: { currency: Currency; balance: number } | null;
+  createdAt: string;
+}
 
-```json
-{
-  "type": "object",
-  "required": ["requestId", "success", "data"],
-  "properties": {
-    "requestId": { "type": "string" },
-    "success": { "const": true },
-    "data": {}
-  }
+interface TradeUrlResponse {
+  id: string;
+  url: string;
+  steamId: string;
+  personaName: string | null;
+  avatarUrl: string | null;
+  profileUrl: string | null;
+  isPrimary: boolean;
+  createdAt: string;
 }
 ```
 
-### `ApiError`
+## WebSocket events
 
-```json
-{
-  "type": "object",
-  "required": ["requestId", "success", "data"],
-  "properties": {
-    "requestId": { "type": "string" },
-    "success": { "const": false },
-    "data": {
-      "type": "object",
-      "required": ["code", "message"],
-      "properties": {
-        "code": { "type": "string" },
-        "message": { "type": "string" },
-        "meta": { "type": "object" }
-      }
-    }
-  }
+```ts
+interface WsConnectedEvent {
+  event: "connected";
+  data: { userId: string };
+  ts: number;
 }
+
+interface WsTradeUpdateEvent {
+  event: `trade.${string}`;
+  data: Trade;
+  ts: number;
+}
+
+interface WsSystemNoticeEvent {
+  event: "system.notice";
+  data: { severity: "info" | "warning" | "critical"; message: string };
+  ts: number;
+}
+
+type WsEvent =
+  | WsConnectedEvent
+  | WsTradeUpdateEvent
+  | WsSystemNoticeEvent
+  // … plus deposit variants documented in /guides/websocket
+  ;
 ```
 
-### `ValidationError`
-
-```json
-{
-  "type": "object",
-  "required": ["requestId", "success", "error"],
-  "properties": {
-    "requestId": { "type": "string" },
-    "success": { "const": false },
-    "error": {
-      "type": "object",
-      "required": ["code", "message", "meta"],
-      "properties": {
-        "code": { "const": "VALIDATION_ERROR" },
-        "message": { "type": "string" },
-        "meta": {
-          "type": "object",
-          "required": ["fieldErrors"],
-          "properties": {
-            "fieldErrors": {
-              "type": "object",
-              "additionalProperties": { "type": "string" }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
+For exhaustive type coverage, generate types from the OpenAPI spec —
+that's the canonical source.

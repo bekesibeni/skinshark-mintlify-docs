@@ -1,139 +1,237 @@
 ---
 title: "Webhooks"
-description: "Event delivery model, signature verification, retries, and payload contracts."
+description: "Server-to-server delivery of trade and deposit events using the Standard Webhooks signature scheme, with bounded retries and auto-disable on continuous failure."
 ---
 
-## Current event types
+Webhooks are how SkinShark notifies your server when something happens to
+a trade or deposit. They're durable: failed deliveries are retried with
+backoff. For low-latency in-app updates, pair them with
+[WebSocket](/guides/websocket) — webhooks for state-of-record, sockets
+for UX.
 
-Emitted now:
+The headers and signature scheme follow [Standard Webhooks](https://www.standardwebhooks.com/),
+so any Standard Webhooks library will verify our payloads out of the box.
 
-- `order.updated`
-- `order.refunded`
+## Configuring
 
-Defined in backend model but not currently emitted by public order flows:
+Webhook URLs and signing secrets are dashboard-only operations
+(API-key auth can't change them). In your merchant dashboard:
 
-- `deposit.created`
+1. **Webhooks** tab → set the callback URL.
+2. **Webhook secret** tab → create a secret. The raw secret is shown
+   once at creation; the server stores only an encrypted copy.
+3. Optionally hit "Test" to fire a one-shot delivery against the URL.
+
+## Event types
+
+Trade lifecycle:
+
+- `trade.initiated`
+- `trade.active`
+- `trade.hold`
+- `trade.completed`
+- `trade.failed`
+- `trade.reverted`
+- `trade.settled`
+- `trade.refunded`
+
+Deposit lifecycle:
+
+- `deposit.initiated`
+- `deposit.pending`
 - `deposit.completed`
+- `deposit.partial`
+- `deposit.expired`
 - `deposit.failed`
+- `deposit.refunded`
+- `deposit.cancelled`
+
+## Envelope
+
+Every delivery body is JSON in this shape:
+
+```ts
+interface WebhookEnvelope {
+  id: string;                 // delivery UUID v7 — same value as `webhook-id` header
+  type: string;               // event type, e.g. "trade.completed"
+  createdAt: string;          // ISO-8601
+  data:
+    | { trade: SerializedTrade; item?: SerializedItem; settlement?: { houseFeeCents: number; merchantFeeCents: number } }
+    | { deposit: SerializedDeposit };
+}
+```
+
+Trade events carry a serialised trade plus, where relevant, a single
+inventory item and the settlement fee breakdown. Deposit events carry a
+serialised deposit (gateway or self-hosted crypto fields, depending on
+method).
 
 ## Delivery headers
 
-SkinShark sends:
+| Header | Purpose |
+|---|---|
+| `content-type: application/json` | Always. |
+| `user-agent: SkinShark-Webhooks/1.0` | Identifies us. |
+| `webhook-id` | Delivery UUID — use this for idempotency on your side. Stable across retries of the same event. |
+| `webhook-timestamp` | Unix epoch **seconds** at the moment of signing. |
+| `webhook-signature` | `t=<unix>,s=<base64url-hmac>` (and `s1=<old>` during secret rotation). |
 
-- `content-type: application/json`
-- `user-agent: skinshark-webhooks/1.0`
-- `x-skinshark-signature: t=<unix>,v1=<hex_hmac_sha256>`
-- `x-skinshark-event-id: <event_id>`
-- `x-skinshark-event-type: <event_type>`
+`webhook-signature` is space-separated-value style: `t=...` is the
+timestamp, `s=...` is the current-secret signature, and `s1=...` (when
+present) is the previous-secret signature for the rotation window.
 
-## Signature algorithm
+## Signature verification
 
-Signature input:
+The signature is HMAC-SHA256 over `<id>.<timestamp>.<raw_body>` keyed
+with your secret, encoded as **base64url** (no padding).
 
-```text
-<timestamp>.<raw_json_body>
-```
-
-Digest:
-
-```text
-v1 = HMAC_SHA256(secret, timestamp + "." + rawBody)
-```
-
-Recommended tolerance window: 300 seconds.
-
-## Verification in TypeScript SDK
+**Verify on the raw bytes, before JSON parsing** — re-serialised JSON has
+different whitespace and won't match.
 
 ```ts
-import { SkinsharkSDK } from 'skinshark-sdk';
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { Buffer } from "node:buffer";
 
-const sdk = new SkinsharkSDK({
-  apiKey: process.env.SKINSHARK_API_KEY!,
-  apiSecret: process.env.SKINSHARK_WEBHOOK_SECRET!
-});
+interface VerifyResult {
+  ok: boolean;
+  reason?: "missing-header" | "stale-timestamp" | "bad-signature";
+}
 
-const signature = req.header('x-skinshark-signature') || '';
-const rawBody = req.body; // Buffer from express.raw({ type: 'application/json' })
+export function verifySkinSharkSignature(
+  id: string | undefined,
+  timestamp: string | undefined,
+  signatureHeader: string | undefined,
+  rawBody: Buffer,
+  secret: string,
+  toleranceSec = 300,
+): VerifyResult {
+  if (!id || !timestamp || !signatureHeader) return { ok: false, reason: "missing-header" };
 
-const verification = sdk.verifySignature(signature, rawBody, 300);
-if (!verification.isValid) {
-  return res.status(401).json({ error: verification.error || 'Invalid signature' });
+  const skew = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (!Number.isFinite(skew) || skew > toleranceSec) return { ok: false, reason: "stale-timestamp" };
+
+  // Header format: t=<ts>,s=<sig>[,s1=<sig>]
+  const parts = Object.fromEntries(
+    signatureHeader.split(",").map((kv) => {
+      const i = kv.indexOf("=");
+      return [kv.slice(0, i).trim(), kv.slice(i + 1).trim()];
+    }),
+  );
+
+  const candidates = [parts.s, parts.s1].filter(Boolean) as string[];
+  if (candidates.length === 0) return { ok: false, reason: "bad-signature" };
+
+  const signed = `${id}.${timestamp}.${rawBody.toString("utf8")}`;
+  const expected = createHmac("sha256", secret).update(signed).digest("base64url");
+  const a = Buffer.from(expected);
+
+  for (const c of candidates) {
+    const b = Buffer.from(c);
+    if (a.length === b.length && timingSafeEqual(a, b)) return { ok: true };
+  }
+  return { ok: false, reason: "bad-signature" };
 }
 ```
 
-## Minimal Express handler
+## Express handler
+
+The key bit: `express.raw({ type: "application/json" })` so the body is a
+`Buffer`, not pre-parsed JSON. Verify, then parse.
 
 ```ts
-import express from 'express';
+import express from "express";
 
 const app = express();
-app.post('/webhooks/skinshark', express.raw({ type: 'application/json' }), (req, res) => {
-  const signature = req.header('x-skinshark-signature') || '';
-  const verification = sdk.verifySignature(signature, req.body);
+const SECRET = process.env.SKINSHARK_WEBHOOK_SECRET!;
 
-  if (!verification.isValid) {
-    return res.status(401).json({ ok: false });
-  }
+app.post(
+  "/webhooks/skinshark",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const result = verifySkinSharkSignature(
+      req.header("webhook-id"),
+      req.header("webhook-timestamp"),
+      req.header("webhook-signature"),
+      req.body as Buffer,
+      SECRET,
+    );
+    if (!result.ok) {
+      console.warn("rejected webhook:", result.reason);
+      return res.status(401).end();
+    }
 
-  const event = JSON.parse(req.body.toString('utf8'));
+    const event = JSON.parse((req.body as Buffer).toString("utf8")) as SkinSharkEvent;
+    const eventId = req.header("webhook-id")!;
 
-  // Idempotency key: event.id
-  // Persist first, then ack
-  handleEvent(event);
+    // Idempotency: persist before acking; redeliveries reuse webhook-id.
+    if (await alreadyProcessed(eventId)) return res.status(200).end();
 
-  return res.status(200).json({ received: true });
-});
+    await handleEvent(event);
+    await markProcessed(eventId);
+
+    return res.status(200).end();
+  },
+);
 ```
 
-## Retry and disable behavior
-
-- Dispatcher runs every minute.
-- Failed deliveries are retried with increasing backoff, up to 16 attempts total.
-- After 10 consecutive failures, the subscription is automatically disabled.
-
-## Example payloads
-
-### `order.updated`
-
-```json
-{
-  "id": "c66a66ca-8a2a-4f65-bd8d-e26e470d98fb",
-  "type": "order.updated",
-  "created": 1764237638,
-  "data": {
-    "id": "6928213ddeb8130d609b6ef3",
-    "item": "P250 | Sand Dune (Field-Tested)",
-    "itemId": "1468099453326794752",
-    "amount": 0.03,
-    "currency": "USD",
-    "status": {
-      "code": "PENDING",
-      "label": "Awaiting counterparty."
-    },
-    "timestamp": 1764237638,
-    "cancelType": 0,
-    "cancelReason": "",
-    "settlementTime": null,
-    "protectedCauser": 0
-  }
-}
+```ts
+type SkinSharkEvent = {
+  id: string;
+  type: string;            // "trade.completed", "deposit.failed", ...
+  createdAt: string;
+  data: { trade?: SerializedTrade; item?: SerializedItem; deposit?: SerializedDeposit; settlement?: { houseFeeCents: number; merchantFeeCents: number } };
+};
 ```
 
-### `order.refunded`
+## Retries and disabling
 
-```json
-{
-  "id": "f8f1e6bb-d204-4c3f-9c44-d93f3b8c7c90",
-  "type": "order.refunded",
-  "created": 1764239000,
-  "data": {
-    "id": "6928213ddeb8130d609b6ef3",
-    "amount": 14.71,
-    "currency": "USD",
-    "reason": "cancelled",
-    "protectedCauser": 0,
-    "settlementTime": null,
-    "timestamp": 1764239000
-  }
-}
+- Deliveries enqueue immediately and run as a background processor.
+- Failed deliveries (non-2xx, timeout, network error) retry on a fixed
+  schedule — **11 attempts total** spread over ~14¾ hours per event:
+  30s, 30s, 5m, 5m, 15m, 15m, 1h, 1h, 6h, 6h.
+- After 11 attempts, the delivery is marked `exhausted` — no further
+  retries for that event.
+- The same `webhook-id` is reused on every retry of the same event.
+- If your callback URL is failing **continuously for 72 hours** (no
+  intervening success), the URL is auto-disabled. Fix the endpoint, then
+  re-enable from the dashboard. Until then, new events are queued but
+  not delivered.
+- Use **resend** in the dashboard or via API to retry an exhausted /
+  individual delivery on demand.
+
+<Tip>
+Make your handler idempotent on `webhook-id`. Persist the processed
+event before acking and skip duplicates. The simplest pattern: a unique
+constraint on `webhook_id` in your inbox table.
+</Tip>
+
+## Testing locally
+
+Use a public tunnel (ngrok, Cloudflare Tunnel) to expose your local
+handler, set the URL in the dashboard, then hit "Test" to fire a
+synthetic event — or trigger a real one with a tiny buy.
+
+```bash
+ngrok http 3000
+# Set dashboard webhook URL to: https://<id>.ngrok-free.app/webhooks/skinshark
 ```
+
+## Inspecting deliveries
+
+The merchant dashboard's **Webhooks → Deliveries** tab lists every
+attempt with the request payload, response status, response headers,
+truncated response body, and error if any. Useful for debugging
+signature verification because you can see exactly what we sent.
+
+## Webhooks vs WebSocket
+
+| | Webhooks | WebSocket |
+|---|---|---|
+| Where it lands | Your HTTPS endpoint | Browser / app |
+| Reliability | Retried 11× over ~15h, auto-disable on 72h continuous failure | Best-effort while connected |
+| Latency | Seconds (queued) | Sub-second |
+| Idempotency | Built in (`webhook-id` reused) | Reconnect logic on you |
+| Use for | Order state-of-record, accounting | UI updates, progress bars |
+
+Most production setups use both: webhook fires source-of-truth, WS pushes
+the same event for UI snappiness.

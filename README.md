@@ -1,6 +1,14 @@
-# SkinShark Partner Docs
+# SkinShark Docs
 
-Merchant and partner API documentation for SkinShark, built with [Mintlify](https://mintlify.com).
+Merchant API documentation for SkinShark, built with [Mintlify](https://mintlify.com).
+
+The API reference auto-generates from `openapi.yaml`, which is a copy of
+[`skinshark-api/docs/skinshark-merchant-api-openapi.yaml`](https://github.com/skinshark/skinshark-api).
+When the spec changes, refresh the copy:
+
+```bash
+cp ../skinshark-api/docs/skinshark-merchant-api-openapi.yaml openapi.yaml
+```
 
 ## Development
 

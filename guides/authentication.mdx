@@ -1,36 +1,146 @@
 ---
 title: "Authentication"
-description: "API key authentication model, partner key hierarchy, and access rules."
+description: "API key headers, IP allowlists, and the boundaries between merchant and sub-user context."
 ---
 
-## Header
-
-Send your API key in every request:
+The SkinShark API authenticates every request with a single header:
 
 ```http
-X-API-Key: <your_api_key>
+api-key: sk_live_...
 ```
 
-## Key types
+That's it. There is no OAuth flow, no JWT bearer header, no signed request
+body. Keys are issued from the merchant dashboard, hashed at rest with
+BLAKE3, and revocable instantly.
 
-### Top-level partner API key
+<Note>
+The header name is `api-key` — lowercase, hyphenated. `X-API-Key` is rejected.
+</Note>
 
-- Can access partner endpoints.
-- Can create child/sub-account API keys.
-- Can transfer balance to child accounts.
+## What an API key represents
 
-### Child API key (sub-account)
+An API key is bound to **one merchant account**. The merchant is the parent;
+their sub-users hang off that parent. A key authorises:
 
-- Merchant-scoped key created under a top-level partner.
-- Cannot call top-level-only partner operations.
-- Can call regular trading, user, and wallet endpoints within its own account scope.
+- All `/merchant/*` operations on that merchant
+- Sub-user-context routes (`/user/*`, `/market/*`, `/auth/ws-token`) when
+  combined with an `On-Behalf-Of` header to pick which sub-user to act as
 
-## Access behavior
+Without `On-Behalf-Of`, sub-user-context routes run against the merchant
+itself: `POST /market/buy` without the header buys for the merchant's own
+spot wallet and uses the merchant's primary Steam trade URL. With the
+header, the same call is scoped to a sub-user.
 
-- Endpoints marked top-level-only reject child keys.
-- Some partner market endpoints currently accept authenticated keys generally, but partner keys are the intended mode.
-- API key auth is the only supported integration auth mode.
+See [Acting on behalf of a sub-user](/guides/on-behalf-of) for the full
+mechanics.
 
-## Errors
+## What API keys cannot do
 
-Invalid or missing credentials return `401` with a structured error payload.
+Some operations live in the dashboard only and are gated behind
+session-based JWT auth. API keys get a `403 FORBIDDEN` on:
+
+- API key CRUD (creating, rotating, revoking other keys)
+- Webhook URL config, secret rotation, delivery inspection
+- Adjusting merchant fees (read-only over the API)
+- Account settings (password, email change, 2FA, account deletion)
+- Audit log queries and CSV exports
+
+If you need any of these in an automated flow, file a support request.
+We'll either expose it under API-key auth or build a dedicated provisioning
+endpoint.
+
+## IP allowlists
+
+When you create or rotate a key in the dashboard, you can pin it to one or
+more source IPs. Requests from any other IP fail with:
+
+```json
+{
+  "code": 1305,
+  "key": "API_KEY_IP_DENIED",
+  "message": "Request IP not in allowlist"
+}
+```
+
+<Tip>
+For staging and CI, either pin the key to a NAT egress IP or leave the
+allowlist empty during development. Never commit a non-allowlisted key.
+</Tip>
+
+## Storing and rotating keys
+
+- Treat the raw key like a password. The server only stores a hash; once
+  you lose the raw value, you must rotate.
+- Rotate by creating a new key in the dashboard and revoking the old one.
+  Keep both active for the deploy window so callers can roll over.
+- Set per-environment keys (production vs staging vs CI) with separate IP
+  allowlists. Don't reuse keys across environments.
+
+## TypeScript client
+
+A minimal, typed wrapper that fails fast on envelope errors:
+
+```ts
+const BASE_URL = "https://api.skinshark.gg";
+
+export class SkinSharkError extends Error {
+  constructor(
+    public requestId: string,
+    public code: number,
+    public key: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  onBehalfOf?: string,
+): Promise<T> {
+  const headers: HeadersInit = {
+    "api-key": process.env.SKINSHARK_API_KEY!,
+    "content-type": "application/json",
+    ...init.headers,
+  };
+  if (onBehalfOf) (headers as Record<string, string>)["on-behalf-of"] = onBehalfOf;
+
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  const body = await res.json();
+
+  if (!body.success) {
+    throw new SkinSharkError(
+      body.requestId,
+      body.error.code,
+      body.error.key,
+      body.error.message,
+    );
+  }
+  return body.data as T;
+}
+```
+
+Use it everywhere:
+
+```ts
+// Merchant context
+const profile = await api<{ id: string }>("/merchant");
+
+// Sub-user context (note third arg)
+const userProfile = await api<{ id: string }>("/user", {}, "user_42");
+```
+
+## Common error keys
+
+| Code | HTTP | Key | Meaning |
+|---|---|---|---|
+| 1104 | 401 | `MISSING_API_KEY` | No `api-key` header sent. |
+| 1105 | 401 | `INVALID_API_KEY` | Key not found. |
+| 1106 | 401 | `API_KEY_REVOKED` | Key was active but has been revoked. |
+| 1305 | 403 | `API_KEY_IP_DENIED` | Source IP not on the allowlist. |
+| 1301 | 403 | `ACCOUNT_SUSPENDED` | The merchant account is suspended. |
+| 1300 | 403 | `FORBIDDEN` | Trying to call a dashboard-only endpoint, or `On-Behalf-Of` set on a `/merchant/*` route. |
+| 1401 | 404 | `USER_NOT_FOUND` | `On-Behalf-Of` references a sub-user not owned by this merchant. |
+
+See [Errors](/reference/errors) for the full table.

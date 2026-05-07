@@ -1,8 +1,8 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "SkinShark Partner API",
-  "description": "API documentation for SkinShark merchant and partner integrations.",
+  "name": "SkinShark API",
+  "description": "Server-to-server API for managing sub-users, wallets, deposits, and trades on SkinShark.",
   "colors": {
     "primary": "#12C2A4",
     "light": "#12C2A4",
@@ -22,8 +22,18 @@
             "group": "Getting started",
             "pages": [
               "index",
-              "quickstart",
-              "guides/authentication"
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "guides/authentication",
+              "guides/on-behalf-of",
+              "guides/envelope",
+              "guides/money",
+              "guides/pagination",
+              "guides/idempotency"
             ]
           },
           {
@@ -34,17 +44,23 @@
             ]
           },
           {
-            "group": "Integrations",
+            "group": "Real-time",
             "pages": [
               "guides/webhooks",
-              "guides/sdk"
+              "guides/websocket"
+            ]
+          },
+          {
+            "group": "Tooling",
+            "pages": [
+              "guides/sdk",
+              "guides/error-handling"
             ]
           },
           {
             "group": "Reference",
             "pages": [
               "reference/data-models",
-              "reference/json-schemas",
               "reference/errors",
               "reference/rate-limits"
             ]
@@ -53,42 +69,22 @@
       },
       {
         "tab": "API reference",
-        "groups": [
-          {
-            "group": "v2 (preferred)",
-            "pages": [
-              "api-reference/market-v2",
-              "api-reference/partner-v2"
-            ]
-          },
-          {
-            "group": "v1 account and wallet",
-            "pages": [
-              "api-reference/user-v1",
-              "api-reference/wallet-v1"
-            ]
-          },
-          {
-            "group": "v1 partner platform",
-            "pages": [
-              "api-reference/partner-v1"
-            ]
-          },
-          {
-            "group": "v1 market legacy",
-            "pages": [
-              "api-reference/market-v1-legacy"
-            ]
-          }
-        ]
+        "openapi": {
+          "source": "openapi.yaml",
+          "directory": "api-reference"
+        }
       }
     ]
   },
   "navbar": {
     "links": [
       {
+        "label": "OpenAPI spec",
+        "href": "https://github.com/skinshark/skinshark-api/blob/main/docs/skinshark-merchant-api-openapi.yaml"
+      },
+      {
         "label": "Postman",
-        "href": "https://api.skinshark.gg"
+        "href": "/Skinshark%20partner%20API.postman_collection.json"
       }
     ]
   },

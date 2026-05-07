@@ -1,64 +1,283 @@
 ---
 title: "Quickstart"
-description: "Make your first authenticated call and place your first order with v2 endpoints."
+description: "Make your first authenticated call, create a sub-user, fund it, and place a buy order — all in TypeScript."
 ---
+
+This walkthrough takes about 5 minutes. By the end you'll have a typed client
+hitting the API, a sub-user with funds, and a confirmed trade.
 
 ## Prerequisites
 
-- A SkinShark partner API key
-- Base URL: `https://api.skinshark.gg`
-- Ability to send `X-API-Key` headers
+- A SkinShark merchant API key (`sk_live_...`). Generate one in the dashboard.
+- Node 20+ (or any TypeScript runtime that supports `fetch` natively).
+- Optional: `openapi-typescript` for fully typed responses.
 
-## 1. Check account profile
+## 1. Set up the client
 
-```bash
-curl --request GET \
-  --url "https://api.skinshark.gg/v1/user" \
-  --header "X-API-Key: <YOUR_API_KEY>"
+<CodeGroup>
+
+```ts client.ts
+const BASE_URL = "https://api.skinshark.gg";
+const API_KEY = process.env.SKINSHARK_API_KEY!;
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "api-key": API_KEY,
+      "content-type": "application/json",
+      ...init.headers,
+    },
+  });
+
+  const body = (await res.json()) as
+    | { success: true; requestId: string; data: T }
+    | { success: false; requestId: string; error: { code: number; key: string; message: string } };
+
+  if (!body.success) {
+    throw new Error(`[${body.requestId}] ${body.error.key}: ${body.error.message}`);
+  }
+  return body.data;
+}
 ```
 
-## 2. Search items (v2)
-
-```bash
-curl --request GET \
-  --url "https://api.skinshark.gg/v2/market/search?q=ak-47&start=1&end=20&sort=popularity" \
-  --header "X-API-Key: <YOUR_API_KEY>"
+```bash curl
+export SKINSHARK_API_KEY="sk_live_..."
 ```
 
-## 3. Fetch listings (v2)
+</CodeGroup>
 
-```bash
-curl --request GET \
-  --url "https://api.skinshark.gg/v2/market/listings?item=4a27ccaf8769fd11&page=1&delivery=normal" \
-  --header "X-API-Key: <YOUR_API_KEY>"
+<Tip>
+For full type safety, generate types from the OpenAPI spec with
+[`openapi-typescript`](https://github.com/openapi-ts/openapi-typescript) and
+parameterise `api<T>` against the `paths` object.
+</Tip>
+
+## 2. Confirm credentials
+
+`GET /merchant` returns your merchant profile, current fees, and wallet
+snapshot. If this works, your key + IP allowlist + role are all good.
+
+<CodeGroup>
+
+```ts TypeScript
+const profile = await api<{
+  id: string;
+  email: string;
+  merchantFeeBps: number;
+  wallets: { spot: { currency: string; balance: number } | null };
+}>("/merchant");
+
+console.log(profile.email, "-", profile.wallets.spot?.balance, "USD");
 ```
 
-## 4. Buy an item (v2)
+```bash curl
+curl https://api.skinshark.gg/merchant \
+  -H "api-key: $SKINSHARK_API_KEY"
+```
 
-```bash
-curl --request POST \
-  --url "https://api.skinshark.gg/v2/market/buy" \
-  --header "Content-Type: application/json" \
-  --header "X-API-Key: <YOUR_API_KEY>" \
-  --data '{
-    "itemId": "1494954737741336576",
-    "price": 0.01,
-    "market": "c5game",
-    "tradeUrl": "https://steamcommunity.com/tradeoffer/new/?partner=1872111350&token=Vw8qSy_0"
+</CodeGroup>
+
+## 3. Create a sub-user
+
+A sub-user is an isolated account under your merchant: own wallet, own Steam
+trade URLs, own trade history. Pass an `externalId` you control so you can
+reference this sub-user with your own ID later.
+
+<Note>
+`POST /merchant/users` is **API-key auth only** — it rejects dashboard
+sessions. This is intentional: provisioning happens server-to-server.
+</Note>
+
+<CodeGroup>
+
+```ts TypeScript
+const sub = await api<{
+  id: string;
+  externalId: string | null;
+  currency: "USD" | "EUR";
+}>("/merchant/users", {
+  method: "POST",
+  body: JSON.stringify({
+    email: "alice@example.com",
+    externalId: "user_42",
+  }),
+});
+
+console.log("Sub-user", sub.id, "external", sub.externalId);
+```
+
+```bash curl
+curl https://api.skinshark.gg/merchant/users \
+  -H "api-key: $SKINSHARK_API_KEY" \
+  -H "content-type: application/json" \
+  -d '{"email": "alice@example.com", "externalId": "user_42"}'
+```
+
+</CodeGroup>
+
+## 4. Fund the sub-user
+
+Move balance from your merchant spot wallet to the sub-user. Supply a unique
+`Idempotency-Key` so retrying after a network blip never double-funds.
+
+<CodeGroup>
+
+```ts TypeScript
+import { randomUUID } from "node:crypto";
+
+const fund = await api<{ transactionId: string; idempotent: boolean }>(
+  `/merchant/users/${encodeURIComponent("user_42")}/fund`,
+  {
+    method: "POST",
+    headers: { "idempotency-key": randomUUID() },
+    body: JSON.stringify({ amount: "25.00" }),
+  },
+);
+
+console.log("Funded", fund.transactionId, "(replay:", fund.idempotent, ")");
+```
+
+```bash curl
+curl https://api.skinshark.gg/merchant/users/user_42/fund \
+  -H "api-key: $SKINSHARK_API_KEY" \
+  -H "content-type: application/json" \
+  -H "idempotency-key: $(uuidgen)" \
+  -d '{"amount": "25.00"}'
+```
+
+</CodeGroup>
+
+## 5. Find an item to buy
+
+Acting **on behalf of** the sub-user, search the catalog and grab a live
+listing. The `On-Behalf-Of` header tells the API to scope this call to that
+sub-user — the call runs against their wallet, their Steam trade URL.
+
+<CodeGroup>
+
+```ts TypeScript
+const search = await api<{
+  items: Array<{ id: string; marketHashName: string; price: number }>;
+}>("/market/search?q=ak-47&limit=5", {
+  headers: { "on-behalf-of": "user_42" },
+});
+
+const itemId = search.items[0]!.id;
+
+const listings = await api<{
+  listings: Array<{ id: string; price: number; market: string }>;
+}>(`/market/listings/${itemId}?limit=10`, {
+  headers: { "on-behalf-of": "user_42" },
+});
+
+const listing = listings.listings[0]!;
+console.log("Picked listing", listing.id, "$" + listing.price);
+```
+
+```bash curl
+curl "https://api.skinshark.gg/market/search?q=ak-47&limit=5" \
+  -H "api-key: $SKINSHARK_API_KEY" \
+  -H "on-behalf-of: user_42"
+```
+
+</CodeGroup>
+
+## 6. Buy the listing
+
+Place the order with a `maxPrice` ceiling — if the listing's price drifted
+above this between fetch and buy, that item fails instead of overcharging
+your sub-user.
+
+<CodeGroup>
+
+```ts TypeScript
+const trade = await api<{
+  id: string;
+  status: string;
+  itemCount: number;
+  totalPrice: number;
+}>("/market/buy", {
+  method: "POST",
+  headers: { "on-behalf-of": "user_42" },
+  body: JSON.stringify({
+    items: [
+      {
+        listingId: listing.id,
+        maxPrice: listing.price.toFixed(2),
+      },
+    ],
+    externalId: "checkout_2026_001",
+  }),
+});
+
+console.log("Trade", trade.id, "status", trade.status);
+```
+
+```bash curl
+curl https://api.skinshark.gg/market/buy \
+  -H "api-key: $SKINSHARK_API_KEY" \
+  -H "on-behalf-of: user_42" \
+  -H "content-type: application/json" \
+  -d '{
+    "items": [{ "listingId": "<listing-id>", "maxPrice": "1.50" }],
+    "externalId": "checkout_2026_001"
   }'
 ```
 
-## 5. Track execution and accounting
+</CodeGroup>
 
-Use these endpoints after purchase:
+## 7. Watch it execute
 
-- `GET /v1/user/orders`
-- `GET /v1/user/transactions`
-- `GET /v1/user/ledger`
-- `GET /v1/user/wallet`
+The trade transitions through `INITIATED → PENDING → ACTIVE → HOLD →
+COMPLETED`. Two ways to follow it:
 
-## 6. Enable webhooks
+<Tabs>
+  <Tab title="Poll merchant trades">
+    ```ts
+    const detail = await api<{ status: string; settledAt?: string }>(
+      `/merchant/trades/${trade.id}`,
+    );
+    ```
+  </Tab>
+  <Tab title="WebSocket (recommended)">
+    ```ts
+    const { token } = await api<{ token: string }>("/auth/ws-token", {
+      method: "POST",
+      headers: { "on-behalf-of": "user_42" },
+    });
 
-Set up an HTTPS webhook endpoint and verify `x-skinshark-signature` on every event.
+    const ws = new WebSocket(`wss://api.skinshark.gg/ws?token=${token}`);
+    ws.addEventListener("message", (e) => {
+      const event = JSON.parse(e.data.toString());
+      if (event.event.startsWith("trade.")) console.log(event);
+    });
+    ```
+  </Tab>
+  <Tab title="Webhook">
+    Configure a callback URL in the dashboard, then handle `trade.*` events
+    with signature verification — see [Webhooks](/guides/webhooks).
+  </Tab>
+</Tabs>
 
-Continue with [Webhooks](/guides/webhooks).
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" href="/guides/authentication">
+    Key types, IP allowlists, and the rules for what API-key auth can and
+    can't do.
+  </Card>
+  <Card title="Acting on behalf of" href="/guides/on-behalf-of">
+    The full sub-user model, how `On-Behalf-Of` resolves, and what happens
+    when you forget it.
+  </Card>
+  <Card title="Idempotency" href="/guides/idempotency">
+    Safe retries for funding, buying, and any operation that moves money.
+  </Card>
+  <Card title="Full Platform integration" href="/integration/full-platform">
+    The recommended pattern for SaaS reselling SkinShark to your own users.
+  </Card>
+</CardGroup>

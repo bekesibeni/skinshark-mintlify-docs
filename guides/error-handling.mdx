@@ -1,0 +1,213 @@
+---
+title: "Error handling"
+description: "Retry policy, when to reconcile vs replay, and patterns for safely recovering from any failure mode."
+---
+
+The API returns errors in the [response envelope](/guides/envelope), so
+your client throws a typed `SkinSharkError` for any non-2xx response.
+This page covers what to *do* with that error.
+
+## The retry decision tree
+
+```
+Got an error.
+├─ Network timeout / DNS / connection refused
+│  └─ Retry with same Idempotency-Key (if applicable). Bounded backoff.
+│
+├─ 500 INTERNAL
+│  └─ Retry with same Idempotency-Key. Bounded backoff (3-5 attempts).
+│
+├─ 503 MARKET_UNAVAILABLE / FX_RATE_UNAVAILABLE / MAINTENANCE_MODE
+│  └─ Retry once after 30s. If still failing, surface to user.
+│
+├─ 504 MARKET_TIMEOUT / PURCHASE_RETRY_TIMEOUT
+│  └─ Don't blind-retry. Reconcile by externalId — the operation may have completed.
+│
+├─ 429 RATE_LIMITED
+│  └─ Honor Retry-After header, then retry.
+│
+├─ 422 VALIDATION_FAILED / INVALID_AMOUNT / INSUFFICIENT_BALANCE / PRICE_BELOW_MINIMUM
+│  └─ Don't retry. Fix the input.
+│
+├─ 401 / 403 (auth / forbidden)
+│  └─ Don't retry. Investigate keys, IP allowlist, role, suspended account.
+│
+├─ 404 USER_NOT_FOUND / ORDER_NOT_FOUND / LISTING_NOT_FOUND
+│  └─ Don't retry. The thing doesn't exist.
+│
+├─ 409 PRICE_MISMATCH / IDEMPOTENCY_CONFLICT / EMAIL_TAKEN / TRADE_NOT_CANCELLABLE
+│  └─ Reconcile, don't retry. Re-quote, look up by externalId, etc.
+│
+└─ Truly unknown state (your process crashed mid-call)
+   └─ Reconcile by externalId before retrying anything.
+```
+
+## Reconcile vs replay
+
+**Replay** = send the same request again with the same `Idempotency-Key`.
+The server deduplicates and returns the original result. Only `POST
+/merchant/users/{id}/fund` supports this today.
+
+**Reconcile** = query the API to discover whether the previous attempt
+succeeded, regardless of whether you ever saw the response.
+
+When in doubt, reconcile. Replay is only safe on idempotent endpoints.
+
+```ts
+async function reconcileTrade(checkoutId: string): Promise<Trade | null> {
+  // Look up by your own externalId
+  const result = await api<{
+    items: Trade[];
+    nextCursor: string | null;
+  }>(`/merchant/trades?externalId=${encodeURIComponent(checkoutId)}&limit=1`);
+
+  return result.items[0] ?? null;
+}
+
+async function buyOrReconcile(input: BuyInput): Promise<Trade> {
+  try {
+    return await api("/market/buy", { /* … */ });
+  } catch (err) {
+    // Trade externalId is unique per (subUser, externalId). A duplicate
+    // surfaces as a generic CONFLICT — reconcile to find the original.
+    if (err instanceof SkinSharkError && err.key === "CONFLICT") {
+      const existing = await reconcileTrade(input.checkoutId);
+      if (existing) return existing;
+    }
+    throw err;
+  }
+}
+```
+
+## Bounded retry helper
+
+A reusable retry-with-backoff for safe operations:
+
+```ts
+interface RetryOptions {
+  attempts?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  shouldRetry?: (err: unknown) => boolean;
+}
+
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: RetryOptions = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 3;
+  const base = opts.baseDelayMs ?? 500;
+  const max = opts.maxDelayMs ?? 8_000;
+  const shouldRetry = opts.shouldRetry ?? defaultShouldRetry;
+
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const last = i === attempts - 1;
+      if (last || !shouldRetry(err)) throw err;
+      const delay = Math.min(max, base * 2 ** i) + Math.random() * 200;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error("unreachable");
+}
+
+const RETRYABLE_KEYS = new Set([
+  "INTERNAL",            // 500
+  "MARKET_UNAVAILABLE",  // 503
+  "FX_RATE_UNAVAILABLE", // 503
+  "MAINTENANCE_MODE",    // 503
+  "RATE_LIMITED",        // 429 — pair with Retry-After
+]);
+
+function defaultShouldRetry(err: unknown): boolean {
+  if (!(err instanceof SkinSharkError)) return true; // network/parse errors
+  return RETRYABLE_KEYS.has(err.key);
+}
+```
+
+```ts
+// Safe: idempotency key bound to checkoutId, retry on transient server errors
+await withRetry(() =>
+  api(`/merchant/users/${subUserId}/fund`, {
+    method: "POST",
+    headers: { "idempotency-key": `checkout:${checkoutId}` },
+    body: JSON.stringify({ amount }),
+  }),
+);
+```
+
+## Common error keys, by category
+
+### Auth (don't retry — fix the credential)
+
+| Key | Cause | Fix |
+|---|---|---|
+| `MISSING_API_KEY` | No `api-key` header. | Add it. |
+| `INVALID_API_KEY` | Key not found / wrong env. | Check value and env. |
+| `API_KEY_REVOKED` | Key was revoked in dashboard. | Rotate. |
+| `API_KEY_IP_DENIED` | Source IP not on allowlist. | Update allowlist or pin to NAT IP. |
+| `FORBIDDEN` | Calling a JWT-only route, or `On-Behalf-Of` on `/merchant/*`. | Drop the header / use the right route. |
+| `USER_NOT_FOUND` | `On-Behalf-Of` ID not owned by your merchant. | Check the value. |
+| `ACCOUNT_SUSPENDED` | Merchant or sub-user suspended. | Reactivate before retrying. |
+
+### Money (don't retry — surface to user)
+
+| Key | Cause | Fix |
+|---|---|---|
+| `INSUFFICIENT_BALANCE` | Wallet balance < required. | Top up or reject the operation. |
+| `TRANSFER_CURRENCY_MISMATCH` | Merchant ≠ sub-user wallet currency. | Use deposit flow. |
+| `INVALID_AMOUNT` | Amount ≤ 0 or wrong format. | Validate input. |
+| `MERCHANT_MUST_BE_USD` | Tried to set merchant currency to non-USD. | Merchants are USD-only. |
+
+### Trade (mostly user-facing)
+
+| Key | Cause |
+|---|---|
+| `LISTING_NOT_FOUND` | Listing already sold or removed. |
+| `PRICE_MISMATCH` | Listing price moved above `maxPrice`. Re-quote. |
+| `PRICE_BELOW_MINIMUM` | Quick-buy `maxPrice` below current minimum. |
+| `TRADEURL_REQUIRED` | Sub-user has no primary Steam trade URL set. |
+| `TRADEURL_INVALID_TOKEN` | Trade URL invalid, expired, or inventory private. |
+| `TRADEURL_ESCROW` | Counterparty's account has trade hold enabled. |
+| `TRADE_NOT_CANCELLABLE` | Trade not in a cancellable state. |
+| `TRADE_CANCEL_TOO_SOON` | Trade must be ≥ 30 minutes old to cancel. |
+
+### Idempotency
+
+| Key | Cause |
+|---|---|
+| `IDEMPOTENCY_KEY_REQUIRED` | Header missing on `/fund`. |
+| `IDEMPOTENCY_CONFLICT` | Same key, different body — server returns the original transaction. |
+
+The full table is in [Errors](/reference/errors).
+
+## What to log
+
+Every error has a `requestId`. Log it on every API call (success or fail)
+so support can trace through our side. A useful client-side log line:
+
+```ts
+catch (err) {
+  if (err instanceof SkinSharkError) {
+    console.error(
+      {
+        op: "fund",
+        subUserId,
+        amount,
+        requestId: err.requestId,
+        code: err.code,
+        key: err.key,
+      },
+      err.message,
+    );
+  } else {
+    console.error({ op: "fund", subUserId, amount }, err);
+  }
+}
+```
+
+When you file a support request, paste two or three `requestId`s — they
+let us pull the full request/response and ledger trace from our side
+without back-and-forth.

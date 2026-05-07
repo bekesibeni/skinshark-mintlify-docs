@@ -1,62 +1,114 @@
 ---
-title: "SkinShark partner API"
-description: "Integrate SkinShark liquidity, wallet, and partner operations into your own product."
+title: "SkinShark API"
+description: "Programmatic access to merchant accounts, sub-users, wallets, deposits, and trades on the SkinShark CS2 marketplace."
 ---
 
-## Overview
+The SkinShark API is a server-to-server interface that lets your backend manage
+merchant accounts, provision sub-users, fund wallets, list trades, and execute
+purchases on cross-marketplace inventory. It's the same surface the SkinShark
+dashboard runs on.
 
-SkinShark exposes two implementation modes for businesses and merchants:
+## What you can do with it
 
-- **Core API**: one central partner account that trades, tracks wallet activity, and uses v2 market endpoints.
-- **Full Platform**: partner account plus sub-accounts (merchant API keys), internal balance transfers, and full partner operations.
+<CardGroup cols={2}>
+  <Card title="Provision sub-users" href="/guides/on-behalf-of">
+    Create end-user accounts under your merchant. Each gets its own wallet,
+    Steam trade URLs, and trade history.
+  </Card>
+  <Card title="Fund wallets" href="/integration/full-platform">
+    Move balance from your merchant account to any sub-user with idempotent
+    transfers, or accept deposits via Gate Pay, on-ramp cards, or self-hosted
+    EVM crypto.
+  </Card>
+  <Card title="Buy items" href="/api-reference/buymarketitems">
+    Buy specific listings or hand the server a target item and let it pick
+    cheapest-fill across marketplaces.
+  </Card>
+  <Card title="React in real time" href="/guides/websocket">
+    Subscribe to deposit and trade events over a per-user WebSocket, or set
+    up signed HTTPS webhooks.
+  </Card>
+</CardGroup>
 
-Use **v2 endpoints** whenever they exist. Use v1 endpoints only for features that are not yet available in v2.
+## Base URL
 
-## Base URLs
-
-- **Production**: `https://api.skinshark.gg`
-- **Staging**: provided by the SkinShark team
+```http
+https://api.skinshark.gg
+```
 
 ## Authentication
 
-SkinShark Partner API uses API key authentication only.
+Send your merchant API key on every request:
 
 ```http
-X-API-Key: <your_api_key>
+api-key: sk_live_...
 ```
 
-- Top-level partner keys can create sub-accounts and perform partner transfers.
-- Child/sub-account keys are merchant-scoped credentials under a top-level partner.
+Keys are hashed at rest, optionally bound to source IPs, and revocable from
+the dashboard. To act as a specific sub-user, add an `On-Behalf-Of` header.
+See [Authentication](/guides/authentication) and [Acting on behalf of a sub-user](/guides/on-behalf-of).
 
 ## Response envelope
 
-Most endpoints use:
+Every JSON response is wrapped:
 
 ```json
 {
-  "requestId": "9b7f7d58-8c3a-41a3-9be2-a393d4e8bc95",
+  "requestId": "01900b3f-1ad0-7ab1-9d8a-7b2f54e1d14c",
   "success": true,
-  "data": {}
+  "data": { }
 }
 ```
 
-Error responses commonly use:
+Error responses replace `data` with `error`:
 
 ```json
 {
-  "requestId": "9b7f7d58-8c3a-41a3-9be2-a393d4e8bc95",
+  "requestId": "01900b3f-...",
   "success": false,
-  "data": {
-    "code": "INVALID_PRICE",
-    "message": "Provided price ($1) does not match current price ($1.2)."
+  "error": {
+    "code": 1700,
+    "key": "INSUFFICIENT_BALANCE",
+    "message": "Insufficient balance"
   }
 }
 ```
 
-Validation errors use a separate shape with `error.meta.fieldErrors`.
+The schemas in the [API reference](/api-reference) describe the inner `data`
+shape only; the envelope is implicit. See [Response envelope](/guides/envelope)
+for handling patterns.
 
-## Next steps
+## TypeScript-first
 
-1. Start with [quickstart](/quickstart).
-2. Choose your integration mode: [Core API](/integration/core-api) or [Full Platform](/integration/full-platform).
-3. Implement webhook verification from [Webhooks](/guides/webhooks).
+Every endpoint in this site is typed in TypeScript via the OpenAPI spec.
+[Generate types](/guides/sdk) with `openapi-typescript` and pair them
+with a small `fetch` wrapper — full IntelliSense, zero runtime
+dependencies, drift-free with the spec.
+
+```ts
+import type { paths } from "./skinshark-api";
+
+type CreateSubUserBody =
+  paths["/merchant/users"]["post"]["requestBody"]["content"]["application/json"];
+
+type CreateSubUserResponse =
+  paths["/merchant/users"]["post"]["responses"]["201"]["content"]["application/json"]["data"];
+```
+
+## Where to start
+
+<Steps>
+  <Step title="Make your first authenticated call">
+    [Quickstart](/quickstart) — search items, fetch live listings, place a buy
+    order in under 5 minutes.
+  </Step>
+  <Step title="Pick an integration mode">
+    [Core API](/integration/core-api) for one shared merchant account, or
+    [Full Platform](/integration/full-platform) for one merchant with isolated
+    sub-users.
+  </Step>
+  <Step title="Wire real-time events">
+    [WebSocket](/guides/websocket) for low-latency in-app updates,
+    [Webhooks](/guides/webhooks) for durable server-side delivery.
+  </Step>
+</Steps>

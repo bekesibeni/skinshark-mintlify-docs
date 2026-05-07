@@ -1,94 +1,149 @@
 ---
 title: "Core API"
-description: "Single central account integration for most merchants."
+description: "One merchant account, all activity in one place. Simplest integration."
 ---
 
-## What Core API means
+Core API is the single-account integration model. Your merchant key is the
+only identity that exists — every trade, deposit, and withdrawal posts to
+that one account. No sub-users, no `On-Behalf-Of`, no inter-account
+transfers.
 
-Core API means your company uses **one SkinShark account** as the single operator account.
+This is the right starting point if you operate one storefront, one
+treasury, one consolidated ledger.
 
-Your website can have many end users, but on the SkinShark side all trading and wallet activity is handled by one API key/account context.
+## Mental model
 
-This is the simplest integration model and is usually the best starting point.
+<Frame>
+  ```
+  ┌────────────────────────┐
+  │     Your backend        │
+  │   (one API key)         │
+  └───────────┬────────────┘
+              │   api-key
+              ▼
+  ┌────────────────────────┐
+  │     SkinShark           │
+  │   (one merchant)        │
+  └────────────────────────┘
+  ```
+</Frame>
 
-## Why teams choose Core API
+## When this fits
 
-Teams usually pick Core API when they want to go live fast and avoid account orchestration complexity.
+- One product, one storefront, one treasury.
+- You don't need per-customer balance isolation in SkinShark.
+- All reconciliation can happen at one merchant level.
+- Operations is a single team, not multi-tenant.
 
-Common reasons:
+If any of these *don't* apply, jump to
+[Full Platform](/integration/full-platform).
 
-- You want to launch trading quickly with fewer moving parts.
-- You do not need separate balances per merchant/sub-brand.
-- Your finance and reconciliation can be done at one global account level.
-- One operations team manages trading and funding centrally.
+## Endpoints you'll use
 
-## When Core API is the right choice
+All sub-user-context routes work without an `On-Behalf-Of` header — they
+run as the merchant. So you only ever need:
 
-Choose Core API if most of these are true:
+| Action | Endpoint |
+|---|---|
+| Read merchant profile + balances | `GET /merchant` |
+| Read full ledger | `GET /merchant/ledger` |
+| Search the catalog | `GET /market/search` |
+| Live listings for an item | `GET /market/listings/{itemId}` |
+| Buy specific listings | `POST /market/buy` |
+| Buy by item, server picks fills | `POST /market/buy/quick` |
+| List trades | `GET /market/transactions` (or `GET /merchant/trades`) |
+| Get trade detail | `GET /market/transactions/{tradeId}` |
+| Stats (GMV, fees) | `GET /merchant/stats` |
+| Deposit (Gate Pay / on-ramp / crypto) | `POST /user/wallet/deposit/...` |
 
-- You run a single storefront or product.
-- You have one treasury/balance pool for all transactions.
-- You do not need to provision sub-accounts for downstream merchants.
-- You are okay with one consolidated ledger and order history.
+## Skip these (for now)
 
-## What daily operation looks like
+These endpoints are real, just not relevant in Core API mode:
 
-In production, Core API is usually:
+- `/merchant/users/*` — sub-user CRUD and funding
+- `/merchant/users/{id}/wallet` — sub-user wallet reads
+- `On-Behalf-Of` header — never needed
 
-1. Your app searches and displays inventory with v2 market endpoints.
-2. User action triggers purchase via `POST /v2/market/buy`.
-3. Your backend stores `skinsharkOrderId` and polls `GET /v1/user/orders` for reconciliation.
-4. Your accounting service reads `GET /v1/user/transactions` and `GET /v1/user/ledger`.
-5. Your webhook endpoint processes `order.updated` and `order.refunded`.
-6. Your ops dashboard watches `GET /v1/user/wallet` for funding and withdrawal state.
+You can adopt them later without breaking anything; they're additive.
 
-## Pros and tradeoffs
+## Daily operation
 
-Pros:
+A typical day in Core API:
 
-- Fastest integration.
-- Lowest implementation and maintenance cost.
-- Clear operational ownership.
+<Steps>
+  <Step title="User browses">
+    Your frontend calls `GET /market/search` and `GET /market/listings/{itemId}`
+    to render inventory.
+  </Step>
+  <Step title="User buys">
+    `POST /market/buy` debits your merchant wallet by `totalPrice` and
+    creates a trade.
+  </Step>
+  <Step title="Server confirms">
+    A `trade.completed` webhook fires (or your WebSocket subscriber sees
+    `trade.completed`). Persist the trade against your own order table by
+    `externalId`.
+  </Step>
+  <Step title="Reconcile">
+    Nightly job calls `GET /merchant/ledger?type=spot` and `GET /merchant/stats`
+    against yesterday's window for accounting.
+  </Step>
+  <Step title="Top up">
+    When the merchant balance dips, deposit via Gate Pay / on-ramp /
+    crypto. The deposit credits the merchant wallet directly.
+  </Step>
+</Steps>
 
-Tradeoffs:
+## Code template
 
-- No per-merchant account isolation in SkinShark.
-- All activity is mixed into one account history.
-- If you later need tenant-level account separation, you will migrate to Full Platform mode.
+```ts
+import { randomUUID } from "node:crypto";
 
-## Endpoint strategy
+async function checkoutOnSkinShark(input: {
+  checkoutId: string;       // your order ID
+  listingId: string;
+  maxPrice: string;         // decimal string
+}) {
+  // Buy as the merchant (no On-Behalf-Of)
+  return api<{ id: string; status: string; totalPrice: number }>(
+    "/market/buy",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        items: [{ listingId: input.listingId, maxPrice: input.maxPrice }],
+        externalId: input.checkoutId,
+      }),
+    },
+  );
+}
 
-- Prefer **v2 market** and **v2 partner market data** endpoints.
-- Use **v1 user/wallet** for balances, ledger, transactions, orders, deposits, and withdrawals.
-- Skip sub-account and partner transfer endpoints unless you explicitly need them.
+async function reconcileLastDay() {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const stats = await api<{
+    totals: { gmv: number; feesEarned: number; tradeCount: number };
+  }>(`/merchant/stats?from=${encodeURIComponent(since)}`);
+  return stats.totals;
+}
+```
 
-## Minimum endpoint set
+## What you give up
 
-- `GET /v2/market/search`
-- `GET /v2/market/search/suggestions`
-- `GET /v2/market/listings`
-- `POST /v2/market/buy`
-- `GET /v2/partner/live/listings`
-- `POST /v2/partner/listing-detail`
-- `GET /v1/user`
-- `GET /v1/user/orders`
-- `GET /v1/user/transactions`
-- `GET /v1/user/ledger`
-- `GET /v1/user/wallet`
+- **No tenant isolation.** All trades show up under one merchant. If a
+  customer disputes, they're not separable in SkinShark's view.
+- **One ledger.** Per-customer accounting is your job, not SkinShark's.
+- **Migration cost later.** If your business needs per-customer wallets,
+  you'll move to Full Platform — usually a one-time refactor where you
+  swap one `api()` call signature to take a sub-user ID.
 
-## Optional funding endpoints
+## When to graduate
 
-- `POST /v1/user/wallet/deposit/crypto`
-- `POST /v1/user/wallet/deposit/onramp/session`
-- `POST /v1/user/wallet/withdraw`
+Move to [Full Platform](/integration/full-platform) when you need:
 
-## If you outgrow Core API
+- Per-customer balance isolation (chargeback containment, audit clarity).
+- Multi-tenant reporting in the merchant dashboard.
+- Per-customer fee overrides.
+- Self-service crypto deposits per customer.
 
-You can move to Full Platform later when you need tenant-level isolation.
-
-The migration is typically:
-
-1. Keep v2 market usage unchanged.
-2. Introduce child key provisioning (`POST /v1/partner/users`).
-3. Route each merchant to its own child key.
-4. Move treasury flow to partner transfers (`POST /v1/partner/transfers`).
+The migration is mostly mechanical: provision a sub-user per customer,
+add `On-Behalf-Of`, route customer-attributable calls there. The catalog
+and trade primitives don't change.
