@@ -17,35 +17,37 @@ a request to raise the cap rather than working around it client-side.
 
 | Endpoint | Window | Limit |
 |---|---|---|
-| `POST /merchant/users` (create) | 5 min | 30 |
+| `POST /merchant/users` (create) | 1 min | 100 |
 | `POST /merchant/users/{id}/fund` | 5 min | 100 |
-| `POST /merchant/users/{id}/suspend`, `/reactivate`, `DELETE` | None (default user limiter) | — |
+| `POST /merchant/users/{id}/suspend` | 1 min | 30 |
+| `POST /merchant/users/{id}/reactivate` | 1 min | 30 |
+| `DELETE /merchant/users/{id}` | 1 min | 30 |
 
 ### Trading
 
 | Endpoint | Window | Limit |
 |---|---|---|
-| `POST /market/buy` | 1 min | 10 |
-| `POST /market/buy/quick` | 1 min | 5 |
-| `POST /market/transactions/{tradeId}/items/{itemId}/cancel` | 1 min | 5 |
+| `POST /market/buy` | 1 min | 100 |
+| `POST /market/buy/quick` | 1 min | 50 |
+| `POST /market/transactions/{tradeId}/items/{itemId}/cancel` | 1 min | 50 |
 
 ### Deposits
 
 | Endpoint | Window | Limit |
 |---|---|---|
-| `POST /user/wallet/deposit/gate/quote` | 1 min | 20 |
-| `POST /user/wallet/deposit/gate` | 1 min | 10 |
-| `POST /user/wallet/deposit/onramp/quote` | 1 min | 20 |
-| `POST /user/wallet/deposit/onramp/session` | 1 min | 10 |
-| `POST /user/wallet/deposit/crypto/quote` | 1 min | 20 |
+| `POST /user/wallet/deposit/gate/quote` | 1 min | 100 |
+| `POST /user/wallet/deposit/gate` | 1 min | 50 |
+| `POST /user/wallet/deposit/onramp/quote` | 1 min | 100 |
+| `POST /user/wallet/deposit/onramp/session` | 1 min | 50 |
+| `POST /user/wallet/deposit/crypto/quote` | 1 min | 100 |
 
 ### Sub-user trade URLs
 
 | Endpoint | Window | Limit |
 |---|---|---|
-| `POST /user/settings/tradeurls` | 1 min | 10 |
-| `PATCH /user/settings/tradeurls/{id}` | 1 min | 10 |
-| `DELETE /user/settings/tradeurls/{id}` | 1 min | 10 |
+| `POST /user/settings/tradeurls` | 1 min | 100 |
+| `PATCH /user/settings/tradeurls/{id}` | 1 min | 100 |
+| `DELETE /user/settings/tradeurls/{id}` | 1 min | 100 |
 
 ### Catalog reads
 
@@ -54,8 +56,8 @@ a request to raise the cap rather than working around it client-side.
 | `GET /market/search/suggestions` | 1 min | 1000 |
 | `GET /market/search` | 1 min | 1000 |
 | `GET /market/items/{itemId}` | 1 min | 1000 |
-| `GET /market/listings/{itemId}` | 1 min | 500 |
-| `GET /market/listing/{listingId}` | 1 min | 200 |
+| `GET /market/listings/{itemId}` | 1 min | 200 |
+| `GET /market/listing/{listingId}` | 1 min | 100 |
 
 ### Read endpoints (default)
 
@@ -86,9 +88,9 @@ When you hit the limit, the response is `429` with:
   "requestId": "01900b...",
   "success": false,
   "error": {
-    "code": 1429,
+    "code": 1600,
     "key": "RATE_LIMITED",
-    "message": "Rate limit exceeded"
+    "message": "Too many requests"
   }
 }
 ```

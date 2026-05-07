@@ -11,26 +11,18 @@ sub-user via deposit.
 
 ## Mental model
 
-<Frame>
-  ```
-  ┌────────────────────────────────┐
-  │       Your backend              │
-  │     (one API key)               │
-  └───────────────┬────────────────┘
-                  │   api-key
-                  ▼
-  ┌────────────────────────────────┐
-  │       Merchant account          │
-  │      (your treasury)            │
-  └─────┬──────────┬──────────┬────┘
-        │  fund    │  fund    │  fund
-        ▼          ▼          ▼
-  ┌──────────┐  ┌──────────┐  ┌──────────┐
-  │ user_42  │  │ user_43  │  │ user_44  │
-  │ wallet   │  │ wallet   │  │ wallet   │
-  └──────────┘  └──────────┘  └──────────┘
-  ```
-</Frame>
+```mermaid
+flowchart TB
+    backend["Your backend<br/>(one API key)"]
+    merchant["Merchant account<br/>(your treasury)"]
+    user42["user_42<br/>wallet"]
+    user43["user_43<br/>wallet"]
+    user44["user_44<br/>wallet"]
+    backend -->|api-key| merchant
+    merchant -->|fund| user42
+    merchant -->|fund| user43
+    merchant -->|fund| user44
+```
 
 Acting as a sub-user from your single merchant key is one header:
 

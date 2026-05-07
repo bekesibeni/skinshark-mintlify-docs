@@ -13,20 +13,12 @@ treasury, one consolidated ledger.
 
 ## Mental model
 
-<Frame>
-  ```
-  ┌────────────────────────┐
-  │     Your backend        │
-  │   (one API key)         │
-  └───────────┬────────────┘
-              │   api-key
-              ▼
-  ┌────────────────────────┐
-  │     SkinShark           │
-  │   (one merchant)        │
-  └────────────────────────┘
-  ```
-</Frame>
+```mermaid
+flowchart TB
+    backend["Your backend<br/>(one API key)"]
+    merchant["SkinShark<br/>(one merchant)"]
+    backend -->|api-key| merchant
+```
 
 ## When this fits
 
