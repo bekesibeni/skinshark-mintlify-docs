@@ -1517,7 +1517,7 @@ paths:
       tags: [Sub-users]
       summary: Create a sub-user
       description: |
-        **Auth context:** merchant only. **Rate limit: 30 / 5min.**
+        **Auth context:** merchant only. **Rate limit: 100/min.**
 
         At least one of `email` or `steamId` is required. `externalId` is your
         own stable identifier and can be used in subsequent calls (path params,
@@ -1578,7 +1578,7 @@ paths:
       tags: [Sub-users]
       summary: Soft-delete a sub-user
       description: |
-        **Auth context:** merchant only.
+        **Auth context:** merchant only. **Rate limit: 30/min.**
 
         Sub-user is marked deleted; their wallet is closed. Cannot be undone via
         API. Returns `null` data on success.
@@ -1597,7 +1597,7 @@ paths:
       operationId: suspendSubUser
       tags: [Sub-users]
       summary: Suspend a sub-user
-      description: '**Auth context:** merchant only. Login + buy blocked while suspended.'
+      description: '**Auth context:** merchant only. **Rate limit: 30/min.** Login + buy blocked while suspended.'
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
       responses:
@@ -1615,7 +1615,7 @@ paths:
       operationId: reactivateSubUser
       tags: [Sub-users]
       summary: Reactivate a suspended sub-user
-      description: '**Auth context:** merchant only.'
+      description: '**Auth context:** merchant only. **Rate limit: 30/min.**'
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
       responses:
@@ -1944,7 +1944,7 @@ paths:
       tags: [Sub-user Profile]
       summary: Add a Steam trade URL
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 10/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
         Server resolves the SteamID and persona via Steam — request can fail with
         `TRADEURL_INVALID_TOKEN` (1321) if the trade URL is invalid, expired, or the
@@ -1982,7 +1982,7 @@ paths:
       tags: [Sub-user Profile]
       summary: Update a trade URL (rotate URL or set primary)
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 10/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
         Provide at least one of `url` or `isPrimary`. Only one URL per sub-user
         can be primary.
@@ -2011,7 +2011,7 @@ paths:
       operationId: deleteTradeUrl
       tags: [Sub-user Profile]
       summary: Delete a trade URL
-      description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 10/min.**'
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**'
       responses:
         '200':
           description: Deleted.
@@ -2104,7 +2104,7 @@ paths:
       tags: [Sub-user Deposits]
       summary: Quote a Gate Pay deposit
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 20/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
         Quote is short-lived (TTL embedded in `expiresIn`). Pass `quoteToken` to
         the create endpoint to commit.
@@ -2137,7 +2137,7 @@ paths:
       tags: [Sub-user Deposits]
       summary: Create a Gate Pay deposit from a quote
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 10/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
 
         Returns either a hosted `whitelabelUrl` (redirect the sub-user there) or
         an on-chain pay-to address — usually both. Settlement happens via the
@@ -2174,7 +2174,7 @@ paths:
       operationId: quoteOnrampDeposit
       tags: [Sub-user Deposits]
       summary: Quote a card on-ramp deposit
-      description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 20/min.**'
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**'
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
       requestBody:
@@ -2204,7 +2204,7 @@ paths:
       tags: [Sub-user Deposits]
       summary: Create a hosted card-payment session
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 10/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
 
         Returns a `whitelabelUrl` to redirect the sub-user to. After payment,
         the on-ramp partner posts a callback and the sub-user's wallet is
@@ -2269,7 +2269,7 @@ paths:
       tags: [Sub-user Deposits]
       summary: Preview crypto deposit value across chains
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 20/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
         Returns per-chain receive amount and gas preview for the requested
         token + amount. Used to show the sub-user the cheapest network.
@@ -2466,7 +2466,7 @@ paths:
       tags: [Listings]
       summary: List live marketplace offers for an item
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 500/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
 
         Live cross-marketplace offers for an item, dispatched to marketplace
         workers. `market` filters by marketplace index (0 = all). For Doppler
@@ -2507,7 +2507,7 @@ paths:
       tags: [Listings]
       summary: Get a single listing by ID
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
         Used to refresh the latest price/availability on a listing the sub-user
         is about to buy.
@@ -2539,7 +2539,7 @@ paths:
       tags: [Trading]
       summary: Buy specific listings (1–10 at a time)
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 10/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
         Each `items[]` entry references a `listingId` and a `maxPrice` ceiling.
         If the listing's price moved above `maxPrice` between catalog read and
@@ -2580,7 +2580,7 @@ paths:
       tags: [Trading]
       summary: Buy N units of an item — server picks the cheapest matching listings
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 5/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
 
         Used for bulk fills. The server selects up to `amount` listings ≤
         `maxPrice` for the given `itemId` and creates one Trade. `itemCount` in
@@ -2666,7 +2666,7 @@ paths:
       tags: [Trading]
       summary: Cancel a single in-progress item on a Trade
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 5/min.**
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
 
         Best-effort — marketplace must still accept the cancellation. The
         response `status` field reflects whether the cancel succeeded.
