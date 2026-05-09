@@ -88,6 +88,46 @@ with your secret, encoded as **base64url** (no padding).
 **Verify on the raw bytes, before JSON parsing** — re-serialised JSON has
 different whitespace and won't match.
 
+### With `@skinshark/sdk`
+
+```ts
+import express from "express";
+import { verifyWebhook, isError } from "@skinshark/sdk";
+
+const app = express();
+const SECRET = process.env.SKINSHARK_WEBHOOK_SECRET!;
+
+app.post(
+  "/webhooks/skinshark",
+  express.raw({ type: "application/json" }),     // raw bytes, not parsed JSON
+  async (req, res) => {
+    let event;
+    try {
+      event = verifyWebhook(req.body, req.headers, { secret: SECRET });
+    } catch (e) {
+      if (isError(e, "INVALID_SIGNATURE")) return res.status(401).end();
+      throw e;
+    }
+
+    // event is typed as a discriminated WebhookEvent union.
+    if (await alreadyProcessed(event.id)) return res.status(200).end();
+    await handleEvent(event);
+    await markProcessed(event.id);
+    return res.status(200).end();
+  },
+);
+```
+
+`verifyWebhook` checks the timestamp tolerance (default 300s, configurable
+via `toleranceSeconds`), validates the HMAC against `s=` and the rotation
+slot `s1=`, and returns the parsed event. It throws `SkinsharkError` with
+`key: "INVALID_SIGNATURE"` on any failure mode.
+
+### Without the SDK
+
+If you don't want the SDK runtime, the verification is ~30 lines of
+`node:crypto`:
+
 ```ts
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
@@ -131,56 +171,6 @@ export function verifySkinSharkSignature(
   }
   return { ok: false, reason: "bad-signature" };
 }
-```
-
-## Express handler
-
-The key bit: `express.raw({ type: "application/json" })` so the body is a
-`Buffer`, not pre-parsed JSON. Verify, then parse.
-
-```ts
-import express from "express";
-
-const app = express();
-const SECRET = process.env.SKINSHARK_WEBHOOK_SECRET!;
-
-app.post(
-  "/webhooks/skinshark",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    const result = verifySkinSharkSignature(
-      req.header("webhook-id"),
-      req.header("webhook-timestamp"),
-      req.header("webhook-signature"),
-      req.body as Buffer,
-      SECRET,
-    );
-    if (!result.ok) {
-      console.warn("rejected webhook:", result.reason);
-      return res.status(401).end();
-    }
-
-    const event = JSON.parse((req.body as Buffer).toString("utf8")) as SkinSharkEvent;
-    const eventId = req.header("webhook-id")!;
-
-    // Idempotency: persist before acking; redeliveries reuse webhook-id.
-    if (await alreadyProcessed(eventId)) return res.status(200).end();
-
-    await handleEvent(event);
-    await markProcessed(eventId);
-
-    return res.status(200).end();
-  },
-);
-```
-
-```ts
-type SkinSharkEvent = {
-  id: string;
-  type: string;            // "trade.completed", "deposit.failed", ...
-  createdAt: string;
-  data: { trade?: SerializedTrade; item?: SerializedItem; deposit?: SerializedDeposit; settlement?: { houseFeeCents: number; merchantFeeCents: number } };
-};
 ```
 
 ## Retries and disabling

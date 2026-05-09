@@ -169,12 +169,12 @@ const search = await api<{
 const itemId = search.items[0]!.id;
 
 const listings = await api<{
-  listings: Array<{ id: string; price: number; market: string }>;
-}>(`/market/listings/${itemId}?limit=10`, {
+  items: Array<{ id: string; price: number; market: string }>;
+}>(`/market/items/${itemId}/listings?limit=10`, {
   headers: { "on-behalf-of": "user_42" },
 });
 
-const listing = listings.listings[0]!;
+const listing = listings.items[0]!;
 console.log("Picked listing", listing.id, "$" + listing.price);
 ```
 

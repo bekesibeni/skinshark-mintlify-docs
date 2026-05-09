@@ -1,18 +1,23 @@
 ---
 title: "Idempotency"
-description: "How to retry money-moving operations safely. The Idempotency-Key header on /fund, externalId on trades."
+description: "How to retry money-moving operations safely. The Idempotency-Key header on /fund, externalId on trades and sub-users."
 ---
 
 Anything that moves money is safe to retry **only** if the server can
 recognise the retry as a duplicate. SkinShark gives you two mechanisms,
-depending on the endpoint.
+chosen per endpoint:
+
+- **`Idempotency-Key` header** on `/fund` — transient retry safety with a
+  short TTL.
+- **`externalId` body field** on sub-user creation, `/market/buy`, and
+  `/market/buy/quick` — your own permanent correlation id, doubles as the
+  natural retry key.
 
 ## Idempotency-Key header (on funding)
 
 `POST /merchant/users/{id}/fund` requires an `Idempotency-Key` header.
 Replays with the same key — for the same merchant — return the original
-transaction with `idempotent: true`, regardless of whether the body
-matches.
+transaction with `idempotent: true`.
 
 ```http
 POST /merchant/users/user_42/fund
@@ -36,12 +41,28 @@ Generate the key once per logical operation, not per HTTP attempt. If your
 checkout retries on network errors, all retries should send the same key.
 </Tip>
 
-```ts
-import { randomUUID } from "node:crypto";
+### With `@skinshark/sdk`
 
+The SDK auto-generates an `Idempotency-Key` (UUIDv4) for every `fund` call
+when you don't pass one. To pin retries to a key derived from your own
+checkout id, pass it explicitly:
+
+```ts
+import { Skinshark } from "@skinshark/sdk";
+
+const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+
+await sdk.users.fund(
+  "user_42",
+  { amount: "25.00" },
+  { idempotencyKey: `checkout:${checkoutId}` },   // your stable key
+);
+```
+
+### With raw fetch
+
+```ts
 async function fundForCheckout(checkoutId: string, subUserId: string, amount: string) {
-  // Derive deterministically from checkoutId so retries from anywhere in
-  // your system reuse the same key.
   const idempotencyKey = `checkout:${checkoutId}`;
 
   return api<{ transactionId: string; idempotent: boolean }>(
@@ -65,46 +86,66 @@ sub-user's externalId never affects scope.
 
 | Code | Key | Meaning |
 |---|---|---|
-| 1705 | `IDEMPOTENCY_KEY_REQUIRED` | Header missing on `/fund`. |
-| 1704 | `IDEMPOTENCY_CONFLICT` | Same key, different body — server returns the original transaction. |
+| 1511 | `IDEMPOTENCY_KEY_REQUIRED` | Header missing on `/fund`. |
+| 1510 | `IDEMPOTENCY_CONFLICT` | Same key, different body. The server returns the conflict instead of replaying. |
 
-## externalId (on trades and sub-users)
+## externalId (on sub-user creation, buys, quick-buys)
 
-`POST /market/buy`, `POST /market/buy/quick`, and `POST /merchant/users`
-accept an `externalId` field in the body. It's stored under a uniqueness
-constraint:
+`POST /merchant/users`, `POST /market/buy`, and `POST /market/buy/quick`
+accept an `externalId` field. The server treats it as the natural retry
+key.
 
-- **Sub-users:** unique per `(merchantId, externalId)`.
-- **Trades:** unique per `(subUserId, externalId)`.
+### Sub-user creation
 
-This means a *correct* retry — same `externalId`, same sub-user, same
-intent — is rejected at the database layer rather than creating a
-duplicate. **Unlike `/fund`, `/market/buy` is not transparently idempotent**:
-you don't get the original trade back. Instead you get a `CONFLICT`
-(1500), and you reconcile by looking up the original.
+`createSubUser` replays on **matching** `externalId`:
+
+- Same `externalId`, same email/steamId → returns the existing user with
+  `idempotent: true` (no duplicate created).
+- Same `externalId`, different email/steamId → 409 `EXTERNAL_ID_TAKEN`.
 
 ```ts
-async function buyOrReconcile(input: {
+const created = await sdk.users.create({
+  email: "alice@example.com",
+  externalId: "customer_42",
+});
+
+if (created.idempotent) {
+  // Already had a sub-user with externalId customer_42, returned the existing one.
+}
+```
+
+### Buys
+
+`market.buy` and `market.quickBuy` replay on matching `externalId` —
+calling either with the same `externalId` for the same sub-user returns
+the **existing** Trade rather than creating a new one. This makes the
+buy + retry pattern idempotent without any extra header.
+
+```ts
+import { Skinshark } from "@skinshark/sdk";
+
+const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+const user = await sdk.as("customer_42");
+
+// Same externalId in both calls = same Trade returned
+const trade1 = await user.market.buy(items, "order-7421");
+const trade2 = await user.market.buy(items, "order-7421");
+// trade1.id === trade2.id
+```
+
+Or with raw fetch:
+
+```ts
+async function buy(input: {
   externalId: string;
   subUserId: string;
   items: BuyItem[];
 }): Promise<Trade> {
-  try {
-    return await api<Trade>("/market/buy", {
-      method: "POST",
-      headers: { "on-behalf-of": input.subUserId },
-      body: JSON.stringify({ items: input.items, externalId: input.externalId }),
-    });
-  } catch (err) {
-    if (err instanceof SkinSharkError && err.key === "CONFLICT") {
-      // Look up by your own externalId
-      const found = await api<{ items: Trade[] }>(
-        `/merchant/trades?externalId=${encodeURIComponent(input.externalId)}&limit=1`,
-      );
-      if (found.items[0]) return found.items[0];
-    }
-    throw err;
-  }
+  return await api<Trade>("/market/buy", {
+    method: "POST",
+    headers: { "on-behalf-of": input.subUserId },
+    body: JSON.stringify({ items: input.items, externalId: input.externalId }),
+  });
 }
 ```
 
@@ -120,41 +161,48 @@ the same ID; a fresh checkout gets a fresh ID.
 
 ## Operations without idempotency
 
-Some endpoints don't have idempotency support yet:
+Some endpoints don't have idempotency support — duplicates from network
+failures need different handling:
 
-- Most catalog reads (search, listings, item detail) — these are GETs and
-  free to retry.
-- Deposit `quote` and `session` endpoints — quotes are short-lived; if
-  you retry within the TTL you'll get a different quote. Don't retry on
-  network failure; create a fresh quote.
+- **Catalog reads** (search, listings, item detail) — GETs, free to retry.
+- **Deposit `quote` endpoints** — quotes are short-lived (TTL embedded in
+  `expiresIn`); if you retry within the TTL you'll get a different quote.
+  Don't retry on network failure; create a fresh quote.
+- **Deposit `create` / `session` endpoints** — retrying after a network
+  failure can produce two pending deposits. Pattern: walk recent deposits
+  for the sub-user and **resume** the existing one rather than creating
+  fresh:
 
-For deposit `create` paths (`POST /user/wallet/deposit/gate`,
-`/onramp/session`), retrying after a failure can produce two pending
-deposits. Pattern: walk recent deposits for the sub-user and resume the
-existing one rather than creating fresh.
+```ts
+// Resume an in-progress deposit instead of creating a new one
+await sdk.deposits.resume(fundingId);
+// Returns the current whitelabelUrl / on-chain address.
+```
+
+If your quote expires mid-flow:
 
 ```ts
 try {
-  return await api("/user/wallet/deposit/gate", { method: "POST", body }, subUserId);
+  return await sdk.deposits.gate.create({ quoteToken, chain }, { onBehalfOf: subUserId });
 } catch (err) {
-  if (err instanceof SkinSharkError && err.key === "INVALID_QUOTE") {
-    // Quote expired — re-quote, don't replay
-    const quote = await api("/user/wallet/deposit/gate/quote", { method: "POST", body: requote }, subUserId);
-    return api("/user/wallet/deposit/gate", { method: "POST", body: { ...body, quoteToken: quote.quoteToken } }, subUserId);
+  if (isError(err, "INVALID_QUOTE")) {
+    const quote = await sdk.deposits.gate.quote(requote, { onBehalfOf: subUserId });
+    return sdk.deposits.gate.create({ quoteToken: quote.quoteToken, chain }, { onBehalfOf: subUserId });
   }
   throw err;
 }
 ```
 
-Use `POST /user/wallet/deposit/{id}/resume` to fetch a fresh hosted URL
-or pay-to address for an existing deposit.
-
 ## When to retry vs reconcile
 
 | Failure mode | Action |
 |---|---|
-| Network timeout | Retry with the same idempotency key. |
-| `5xx` from SkinShark | Retry with the same idempotency key. |
+| Network timeout | Retry with the same idempotency key (or `externalId`). |
+| `5xx` from SkinShark | Retry with the same idempotency key (or `externalId`). |
 | `4xx` other than `429` | Don't retry. Fix the input. |
 | `429 Rate limited` | Honour `Retry-After`, then retry. |
 | Truly unknown state (e.g. you crashed mid-call) | Reconcile: query `/merchant/trades?externalId=<your-id>` to see if the trade made it. |
+
+The `@skinshark/sdk` HTTP layer auto-retries 408/429/5xx with exponential
+backoff and `Retry-After`-honouring delays. POST/PATCH retries are gated
+on the presence of `idempotencyKey` to prevent double-charges.

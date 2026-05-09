@@ -4,8 +4,37 @@ description: "Retry policy, when to reconcile vs replay, and patterns for safely
 ---
 
 The API returns errors in the [response envelope](/guides/envelope), so
-your client throws a typed `SkinSharkError` for any non-2xx response.
+your client throws a typed `SkinsharkError` for any non-2xx response.
 This page covers what to *do* with that error.
+
+## Using `@skinshark/sdk`
+
+If you're using the SDK, you get the typed error class plus narrowing
+guards out of the box:
+
+```ts
+import { Skinshark, SkinsharkError, isError, isAuthError, isRateLimited } from "@skinshark/sdk";
+
+try {
+  await sdk.market.buy(items, "order-1", { onBehalfOf: "u-1" });
+} catch (e) {
+  if (!(e instanceof SkinsharkError)) throw e;
+
+  if (isError(e, "INSUFFICIENT_BALANCE")) /* refill */;
+  if (isError(e, "PRICE_MISMATCH"))       /* refresh listing */;
+  if (isAuthError(e))                     /* rotate key */;
+  if (isRateLimited(e))                   await sleep(e.retryAfterMs ?? 1000);
+
+  console.error({ key: e.key, code: e.code, requestId: e.requestId });
+}
+```
+
+The SDK also auto-retries 408/429/5xx with exponential backoff and
+`Retry-After` honoring. POST/PATCH retries are gated on the presence of
+`idempotencyKey` to prevent double-charges. The decision tree below
+applies whether you're using the SDK or raw fetch — the SDK handles the
+network/timeout/5xx layer for you, and you handle the business-rule
+errors at the call site.
 
 ## The retry decision tree
 

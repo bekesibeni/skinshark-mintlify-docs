@@ -1,0 +1,62 @@
+name: Publish Swagger UI to GitHub Pages
+
+# Builds Swagger UI from openapi.yaml and pushes it to the `gh-pages` branch.
+# Enable in repo settings: Pages → Deploy from branch → gh-pages → /(root).
+# GitHub Pages then serves it at:
+#   https://bekesibeni.github.io/skinshark-mintlify-docs/
+#
+# This Swagger UI sandbox runs alongside the Mintlify-hosted docs site
+# (which renders the same spec under its API reference tab). Both stay in
+# sync because they read the exact same `openapi.yaml`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'openapi.yaml'
+      - '.github/workflows/swagger-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  SWAGGER_UI_VERSION: v5.32.5
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate OpenAPI spec
+        run: npx -y @redocly/cli@latest lint openapi.yaml
+
+      - name: Download Swagger UI dist
+        run: |
+          mkdir -p _site
+          curl -sL "https://github.com/swagger-api/swagger-ui/archive/refs/tags/${SWAGGER_UI_VERSION}.tar.gz" \
+            | tar -xz --strip-components=1 -C _site "swagger-ui-${SWAGGER_UI_VERSION#v}/dist"
+          mv _site/dist/* _site/
+          rmdir _site/dist
+          cp openapi.yaml _site/openapi.yaml
+
+      - name: Point Swagger UI at openapi.yaml
+        run: |
+          # Default initializer points at petstore.swagger.io. Replace with our spec.
+          sed -i 's|https://petstore\.swagger\.io/v2/swagger\.json|openapi.yaml|g' _site/swagger-initializer.js
+          # Tweak page title.
+          sed -i 's|<title>Swagger UI</title>|<title>SkinShark Merchant API — Swagger UI</title>|' _site/index.html
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: 'docs: rebuild Swagger UI for ${{ github.sha }}'

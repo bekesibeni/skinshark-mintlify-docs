@@ -29,7 +29,7 @@ a request to raise the cap rather than working around it client-side.
 |---|---|---|
 | `POST /market/buy` | 1 min | 100 |
 | `POST /market/buy/quick` | 1 min | 50 |
-| `POST /market/transactions/{tradeId}/items/{itemId}/cancel` | 1 min | 50 |
+| `POST /market/trades/{tradeId}/items/{itemId}/cancel` | 1 min | 50 |
 
 ### Deposits
 
@@ -56,8 +56,8 @@ a request to raise the cap rather than working around it client-side.
 | `GET /market/search/suggestions` | 1 min | 1000 |
 | `GET /market/search` | 1 min | 1000 |
 | `GET /market/items/{itemId}` | 1 min | 1000 |
-| `GET /market/listings/{itemId}` | 1 min | 200 |
-| `GET /market/listing/{listingId}` | 1 min | 100 |
+| `GET /market/items/{itemId}/listings` | 1 min | 200 |
+| `GET /market/listings/{listingId}` | 1 min | 100 |
 
 ### Read endpoints (default)
 

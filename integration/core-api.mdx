@@ -40,11 +40,11 @@ run as the merchant. So you only ever need:
 | Read merchant profile + balances | `GET /merchant` |
 | Read full ledger | `GET /merchant/ledger` |
 | Search the catalog | `GET /market/search` |
-| Live listings for an item | `GET /market/listings/{itemId}` |
+| Live listings for an item | `GET /market/items/{itemId}/listings` |
 | Buy specific listings | `POST /market/buy` |
 | Buy by item, server picks fills | `POST /market/buy/quick` |
-| List trades | `GET /market/transactions` (or `GET /merchant/trades`) |
-| Get trade detail | `GET /market/transactions/{tradeId}` |
+| List trades | `GET /market/trades` (or `GET /merchant/trades`) |
+| Get trade detail | `GET /market/trades/{tradeId}` |
 | Stats (GMV, fees) | `GET /merchant/stats` |
 | Deposit (Gate Pay / on-ramp / crypto) | `POST /user/wallet/deposit/...` |
 
@@ -64,7 +64,7 @@ A typical day in Core API:
 
 <Steps>
   <Step title="User browses">
-    Your frontend calls `GET /market/search` and `GET /market/listings/{itemId}`
+    Your frontend calls `GET /market/search` and `GET /market/items/{itemId}/listings`
     to render inventory.
   </Step>
   <Step title="User buys">

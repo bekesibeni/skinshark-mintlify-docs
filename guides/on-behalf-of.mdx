@@ -36,6 +36,11 @@ to choose. Most teams set `externalId` to their internal user ID
 | `/market/*` | Optional — sets the calling sub-user. |
 | `/auth/ws-token`, `/ws` | Optional — scopes the WebSocket token. |
 
+With `@skinshark/sdk`, you can either pass `onBehalfOf` per call or bind a
+sub-user once with `await sdk.as(ref)` and call methods on the returned
+client — it injects the header for every call. See the
+[SDK guide](/guides/sdk) for the full pattern.
+
 Without the header on a sub-user-context route, the call runs **as the
 merchant itself**. That's intentional: it lets the merchant trade for its
 own account when needed.
@@ -75,7 +80,7 @@ own account when needed.
 
     // (b) Sub-user-context endpoint, with the header
     await api(
-      "/market/transactions?limit=25",
+      "/market/trades?limit=25",
       {},
       userId,
     );
@@ -99,7 +104,7 @@ enumerated through error responses.
   "requestId": "01900b...",
   "success": false,
   "error": {
-    "code": 1401,
+    "code": 1307,
     "key": "USER_NOT_FOUND",
     "message": "User not found"
   }

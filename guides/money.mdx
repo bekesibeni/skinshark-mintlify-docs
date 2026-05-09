@@ -3,42 +3,39 @@ title: "Money format"
 description: "Why some fields are integer cents, why some are decimals, and what to send when you're the input side."
 ---
 
-Floating-point math drops cents on large balances. SkinShark stores every
-amount as `bigint` cents internally and serialises it carefully. Two
-conventions, depending on whether you're reading or writing.
+SkinShark stores every amount as `bigint` cents internally. On the wire two
+shapes appear, depending on whether you're reading or writing.
 
 ## Reading
 
 | Field suffix | Type | Example | Meaning |
 |---|---|---|---|
-| `Cents` | `string` | `"1500"` | Integer cents, serialised as a decimal string to preserve `bigint` precision in JSON. |
+| `Cents` | `number` | `1500` | Integer cents as a JSON number. Safe through ~$90T (2^53 cents). |
 | no suffix (`balance`, `gmv`, `totalPrice`) | `number` | `15.00` | Decimal in the wallet's currency, two decimal places. |
 
-Both shapes are present on most endpoints. Use whichever matches your
-storage model:
+Both shapes are present on most endpoints. Pick whichever matches your storage:
 
 ```ts
 interface MerchantStats {
   totals: {
-    gmvCents: string;     // "1234500" — bigint string, precise
-    gmv: number;          // 12345.00 — decimal number, lossy at very large values
-    feesEarnedCents: string;
+    gmvCents: number;       // 1234500 — exact integer cents
+    gmv: number;            // 12345.00 — decimal number
+    feesEarnedCents: number;
     feesEarned: number;
   };
 }
 ```
 
 <Tip>
-For accounting and ledger reconciliation, work with `*Cents` strings as
-`BigInt` in Node 20+. For UI display, the decimal field is fine — at any
-realistic merchant scale (< $10^9), JSON `number` round-trips cleanly.
+For accounting and ledger math, work with `*Cents` integers — exact in JS up to
+2^53. For UI display, the decimal field is fine.
 </Tip>
 
 ```ts
 const stats = await api<MerchantStats>("/merchant/stats");
 
-const gmvCents = BigInt(stats.totals.gmvCents);  // safe arithmetic
-const display = stats.totals.gmv.toFixed(2);     // "12345.00" for the UI
+const gmvCents = stats.totals.gmvCents;        // exact integer
+const display = stats.totals.gmv.toFixed(2);   // "12345.00" for the UI
 ```
 
 ## Writing
@@ -79,30 +76,31 @@ fund("user_42", String(25.50));  // works, but be careful
 
 ## A safe converter
 
-Convert from cents to decimal string, never with `Number / 100`:
+Convert from cents to decimal string without `Number / 100`:
 
 ```ts
-function centsToDecimal(cents: bigint, decimals = 2): string {
-  const negative = cents < 0n;
-  const abs = negative ? -cents : cents;
+function centsToDecimal(cents: number | bigint, decimals = 2): string {
+  const c = BigInt(cents);
+  const negative = c < 0n;
+  const abs = negative ? -c : c;
   const divisor = 10n ** BigInt(decimals);
   const whole = abs / divisor;
   const fraction = (abs % divisor).toString().padStart(decimals, "0");
   return `${negative ? "-" : ""}${whole}.${fraction}`;
 }
 
-centsToDecimal(2550n);     // "25.50"
-centsToDecimal(99999999n); // "999999.99" — exact
+centsToDecimal(2550);      // "25.50"
+centsToDecimal(99999999);  // "999999.99" — exact
 ```
 
-The reverse — decimal string to cents — is just `BigInt(decimal.replace(".", ""))`
+The reverse — decimal string to cents — is just `Number(decimal.replace(".", ""))`
 after padding.
 
 ## Currency
 
 Every wallet has exactly one currency: `USD` or `EUR`. **Merchant accounts
 are USD-only** — attempting to set them to anything else returns
-`MERCHANT_MUST_BE_USD` (1711). Sub-users default to USD on creation; pass
+`MERCHANT_MUST_BE_USD` (1521). Sub-users default to USD on creation; pass
 `currency: "EUR"` on `POST /merchant/users` to override per sub-user.
 
 Funding a sub-user from the merchant spot wallet requires both wallets to
@@ -111,7 +109,7 @@ transfer:
 
 ```json
 {
-  "code": 1710,
+  "code": 1520,
   "key": "TRANSFER_CURRENCY_MISMATCH",
   "message": "Merchant and sub-user currencies do not match"
 }

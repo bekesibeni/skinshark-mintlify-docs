@@ -1,23 +1,116 @@
 ---
-title: "TypeScript types"
-description: "Generate types from the OpenAPI spec for full IntelliSense. No SDK required."
+title: "SDK & TypeScript types"
+description: "Use the official @skinshark/sdk for the fastest path, or generate types from the OpenAPI spec for typed fetch."
 ---
 
-You don't need an SDK to use the API — `fetch` plus the typed wrapper
-from [Authentication](/guides/authentication) covers everything. For
-fully typed responses with zero hand-maintenance, generate a `paths`
-type from the OpenAPI spec.
+There are two supported ways to call the API from TypeScript. Use the
+official SDK if you want a polished client; generate types if you'd rather
+keep your own HTTP code.
 
-## Generate types from the spec
+## Option 1 — official SDK (recommended)
 
-The OpenAPI spec is the source of truth. Generate a `paths` type with
-[`openapi-typescript`](https://github.com/openapi-ts/openapi-typescript)
-and you get full IntelliSense over every endpoint.
+```bash
+npm install @skinshark/sdk
+```
+
+```ts
+import { Skinshark, SkinsharkError, isError, meta } from "@skinshark/sdk";
+
+const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+
+// Merchant context
+const profile = await sdk.account.get();
+const stats = await sdk.account.stats({ from: "2026-01-01T00:00:00Z" });
+
+// Sub-user context — bind once, then call as that user
+const user = await sdk.as("user_42");           // validates ownership at bind time
+const trade = await user.market.buy(
+  [{ listingId, maxPrice: "5.00" }],
+  "order-7421",                                  // your correlation id
+);
+
+// Or one-off via opts
+await sdk.market.buy(items, "order-1", { onBehalfOf: "user_42" });
+```
+
+The package is **ESM-only**, **Node 22+**, server-to-server. It uses `got`
+under the hood, ships zero runtime deps beyond that, and exposes:
+
+- `sdk.account`, `sdk.users`, `sdk.trades` — merchant-only
+- `sdk.profile`, `sdk.tradeUrls`, `sdk.wallet`, `sdk.deposits`, `sdk.market` — actor-context
+- `sdk.as(ref)` — async, validates the ref and returns a sub-user-bound view
+- `sdk.health()`, `sdk.newIdempotencyKey()`, `sdk.request<T>(...)` — utilities
+- `verifyWebhook(rawBody, headers, { secret })` — signature verification (zero deps beyond `node:crypto`)
+- `meta(response)` — read `requestId`, `status`, `headers`, `rateLimit` from any successful response
+
+```ts
+import { verifyWebhook, isError } from "@skinshark/sdk";
+
+try {
+  const event = verifyWebhook(rawBody, req.headers, {
+    secret: process.env.SKINSHARK_WH_SECRET!,
+  });
+  switch (event.type) {
+    case "trade.completed": /* ... */ break;
+    case "deposit.completed": /* ... */ break;
+  }
+} catch (e) {
+  if (isError(e, "INVALID_SIGNATURE")) return res.status(401).end();
+  throw e;
+}
+```
+
+### Type-only imports
+
+For UI/server code that just needs the wire types without the runtime
+client, import from the `/types` subpath:
+
+```ts
+import type {
+  Trade,
+  MarketListing,
+  BuyBody,
+  ErrorKey,
+} from "@skinshark/sdk/types";
+```
+
+### Errors
+
+A single `SkinsharkError` class is thrown for every failure. Branch on the
+discriminated `key`:
+
+```ts
+import { SkinsharkError, isError, isAuthError, isRateLimited } from "@skinshark/sdk";
+
+try {
+  await sdk.market.buy(items, "order-1", { onBehalfOf: "u-1" });
+} catch (e) {
+  if (!(e instanceof SkinsharkError)) throw e;
+
+  if (isError(e, "INSUFFICIENT_BALANCE")) /* refill */;
+  if (isError(e, "PRICE_MISMATCH"))       /* refresh listing */;
+  if (isError(e, "TRADEURL_REQUIRED"))    /* prompt user */;
+  if (isAuthError(e))                     /* rotate key */;
+  if (isRateLimited(e))                   await sleep(e.retryAfterMs ?? 1000);
+
+  console.error({ key: e.key, requestId: e.requestId });   // for support
+}
+```
+
+See [Error handling](/guides/error-handling) for retry strategy and the
+full key catalogue at [reference/errors](/reference/errors).
+
+## Option 2 — generate types from the OpenAPI spec
+
+If you'd rather not pull in the SDK runtime — for example, you're calling
+from a non-Node runtime or already have an HTTP client you're happy with —
+generate a `paths` type from the spec and pair it with a tiny `fetch`
+wrapper.
 
 ```bash
 npm install -D openapi-typescript
 npx openapi-typescript \
-  https://raw.githubusercontent.com/skinshark/skinshark-api/main/docs/skinshark-merchant-api-openapi.yaml \
+  https://api.skinshark.gg/openapi.yaml \
   -o src/skinshark-types.ts
 ```
 
@@ -35,10 +128,7 @@ type ListTradesQuery = NonNullable<
 >;
 ```
 
-## A typed fetch helper
-
-Pair it with a tiny `fetch` wrapper that infers the `data` shape from the
-operation's success response:
+### A typed fetch helper
 
 ```ts
 import type { paths } from "./skinshark-types";
@@ -90,38 +180,25 @@ const profile = await call("get", "/merchant");
 const sub = await call("post", "/merchant/users", {
   body: { email: "alice@example.com", externalId: "user_42" },
 });
-//    ^? { id: string; externalId: string | null; ... }
+//    ^? { id: string; externalId: string | null; idempotent: boolean; ... }
 
 const trades = await call("get", "/merchant/trades", {
-  query: { status: "completed", limit: "50" },
+  query: { status: "COMPLETED", limit: "50" },
 });
 //    ^? { items: Trade[]; nextCursor: string | null }
 ```
 
-This is the highest-leverage option: zero runtime dependencies, types
-drift automatically as the spec evolves, and the wrapper is ~30 lines.
-Pin the spec to a git tag if you want stable types between releases.
-
-## Types only, no client
-
-If you already have an HTTP client you're happy with, skip the wrapper
-and just consume the generated `paths` type:
-
-```ts
-import type { paths } from "./skinshark-types";
-
-type Trade = paths["/merchant/trades/{id}"]["get"]["responses"][200]["content"]["application/json"]["data"];
-type FundBody = paths["/merchant/users/{id}/fund"]["post"]["requestBody"]["content"]["application/json"];
-```
-
-For shorter aliases, hand-roll the most-used types in
-[Data models](/reference/data-models) (or copy them from there) — those
-mirror the spec but read better in code.
+Zero runtime dependencies, types drift automatically as the spec evolves,
+and the wrapper is ~30 lines. Pin the spec to a git tag (or a vendored
+copy) for stable types between releases.
 
 ## Webhook signature verification
 
-Drop the `verifySkinSharkSignature` helper from
-[Webhooks](/guides/webhooks#signature-verification) into your codebase.
-It's ~30 lines, has no dependencies beyond `node:crypto`, and follows
-the [Standard Webhooks](https://www.standardwebhooks.com/) scheme — so
-any Standard Webhooks library on the npm side works just as well.
+The SDK ships a `verifyWebhook(rawBody, headers, { secret })` helper that
+follows [Standard Webhooks](https://www.standardwebhooks.com/) — see the
+[Webhooks guide](/guides/webhooks#signature-verification) for the full
+shape and example handlers.
+
+If you're not using the SDK, the verification is ~30 lines of
+`node:crypto` — copy from the same guide, or use any Standard Webhooks
+library from npm.

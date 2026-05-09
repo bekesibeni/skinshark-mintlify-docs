@@ -19,28 +19,30 @@
         "tab": "Guides",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get started",
             "pages": [
               "index",
               "quickstart"
             ]
           },
           {
-            "group": "Concepts",
+            "group": "Core concepts",
             "pages": [
               "guides/authentication",
               "guides/on-behalf-of",
               "guides/envelope",
               "guides/money",
               "guides/pagination",
-              "guides/idempotency"
+              "guides/idempotency",
+              "guides/error-handling"
             ]
           },
           {
-            "group": "Integration modes",
+            "group": "Integration",
             "pages": [
               "integration/core-api",
-              "integration/full-platform"
+              "integration/full-platform",
+              "guides/sdk"
             ]
           },
           {
@@ -48,13 +50,6 @@
             "pages": [
               "guides/webhooks",
               "guides/websocket"
-            ]
-          },
-          {
-            "group": "Tooling",
-            "pages": [
-              "guides/sdk",
-              "guides/error-handling"
             ]
           },
           {
@@ -79,8 +74,12 @@
   "navbar": {
     "links": [
       {
+        "label": "Swagger UI",
+        "href": "https://bekesibeni.github.io/skinshark-mintlify-docs/"
+      },
+      {
         "label": "OpenAPI spec",
-        "href": "https://github.com/skinshark/skinshark-api/blob/main/docs/skinshark-merchant-api-openapi.yaml"
+        "href": "/openapi.yaml"
       },
       {
         "label": "Postman",

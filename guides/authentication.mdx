@@ -76,7 +76,39 @@ allowlist empty during development. Never commit a non-allowlisted key.
 - Set per-environment keys (production vs staging vs CI) with separate IP
   allowlists. Don't reuse keys across environments.
 
-## TypeScript client
+## TypeScript clients
+
+The fastest path is the official `@skinshark/sdk` package, which handles
+the headers, envelope unwrapping, retries, and typed errors for you. Keep
+reading if you'd rather build your own wrapper.
+
+### With `@skinshark/sdk`
+
+```bash
+npm install @skinshark/sdk
+```
+
+```ts
+import { Skinshark } from "@skinshark/sdk";
+
+const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+
+// Merchant context
+const profile = await sdk.account.get();
+
+// Sub-user context — bind once
+const user = await sdk.as("user_42");
+const userProfile = await user.profile.get();
+
+// Or per-call
+await sdk.market.buy(items, "order-1", { onBehalfOf: "user_42" });
+```
+
+The constructor also accepts `baseUrl` (e.g. `https://api-staging.skinshark.gg`),
+`timeoutMs`, `retries`, `userAgent`, and a `debug` hook. See
+[SDK & TypeScript types](/guides/sdk) for the full surface.
+
+### With raw fetch
 
 A minimal, typed wrapper that fails fast on envelope errors:
 
@@ -141,6 +173,6 @@ const userProfile = await api<{ id: string }>("/user", {}, "user_42");
 | 1305 | 403 | `API_KEY_IP_DENIED` | Source IP not on the allowlist. |
 | 1301 | 403 | `ACCOUNT_SUSPENDED` | The merchant account is suspended. |
 | 1300 | 403 | `FORBIDDEN` | Trying to call a dashboard-only endpoint, or `On-Behalf-Of` set on a `/merchant/*` route. |
-| 1401 | 404 | `USER_NOT_FOUND` | `On-Behalf-Of` references a sub-user not owned by this merchant. |
+| 1307 | 404 | `USER_NOT_FOUND` | `On-Behalf-Of` references a sub-user not owned by this merchant. |
 
 See [Errors](/reference/errors) for the full table.

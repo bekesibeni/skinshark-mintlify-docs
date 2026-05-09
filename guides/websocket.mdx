@@ -36,7 +36,15 @@ ticket through the API, then pass it as a `?token=` query string.
     ```
   </Step>
   <Step title="Open the socket">
+    The token can ride in either of two slots. The subprotocol form is
+    preferred — the token isn't logged by proxies / browser history /
+    access logs the way query strings are:
+
     ```ts
+    // Preferred — Sec-WebSocket-Protocol subprotocol
+    const ws = new WebSocket("wss://api.skinshark.gg/ws", [`bearer.${token}`]);
+
+    // Fallback — query string (still supported)
     const ws = new WebSocket(`wss://api.skinshark.gg/ws?token=${token}`);
     ```
 

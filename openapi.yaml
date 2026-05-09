@@ -75,7 +75,7 @@ info:
       "requestId": "req-...",
       "success": false,
       "error": {
-        "code": 1700,
+        "code": 1500,
         "key": "INSUFFICIENT_BALANCE",
         "message": "Insufficient balance"
       }
@@ -86,8 +86,8 @@ info:
 
     ## Money format
 
-    - Fields suffixed `Cents` are integer cents, sometimes serialized as decimal
-      strings to preserve precision (`"15000"` = $150.00).
+    - Fields suffixed `Cents` are integer cents as JSON numbers
+      (`15000` = $150.00).
     - Decimal-currency fields like `balance`, `totalPrice`, `gmv` are JSON numbers
       in the wallet currency (`5.23` = $5.23 in a USD wallet).
     - Amount **inputs** (e.g. `fund`, deposit `amount`) accept decimal strings
@@ -130,34 +130,28 @@ info:
 servers:
   - url: https://api.skinshark.gg
     description: Production
+  - url: https://api-staging.skinshark.gg
+    description: Staging
 
 tags:
-  - name: Merchant Profile
-    description: Merchant snapshot (fees, wallets, 2FA state). Merchant context.
-  - name: Merchant Fees
-    description: Read your fee configuration. Merchant context. Changes are made from the merchant dashboard.
-  - name: Merchant Stats
-    description: GMV, fees earned, top sub-users, trade-status breakdown. Merchant context.
-  - name: Sub-users
-    description: Create / list / inspect / suspend / fund sub-users. Merchant context.
-  - name: Merchant Wallet
-    description: Merchant's own spot/earnings wallet and ledger. Merchant context.
-  - name: Merchant Trades
-    description: Aggregate trade list/detail across the merchant. Merchant context.
-  - name: Sub-user Profile
-    description: Read sub-user profile and manage Steam trade URLs. Sub-user context.
-  - name: Sub-user Wallet
-    description: Sub-user balance and ledger. Sub-user context.
-  - name: Sub-user Deposits
-    description: Fund a sub-user wallet via Gate Pay, on-ramp (card), or self-hosted EVM crypto. Sub-user context.
-  - name: Catalog
-    description: Item search, suggestions, item detail. Sub-user context.
-  - name: Listings
-    description: Live marketplace listings for a given item. Sub-user context.
-  - name: Trading
-    description: Buy listings, list / inspect / cancel transactions. Sub-user context.
+  - name: Account
+    description: Merchant identity, fees, stats, wallet, ledger. Merchant context only.
+  - name: Users
+    description: Sub-user CRUD plus per-user wallet, ledger, trades, and funding. Merchant context only.
+  - name: Trades
+    description: Aggregate trade list across all sub-users. Merchant context only.
+  - name: Profile
+    description: Read the actor's profile (Steam link, Discord link, wallet snapshot). Merchant or sub-user context.
+  - name: Trade URLs
+    description: Manage Steam trade URLs for the actor. Merchant or sub-user context.
+  - name: Wallet
+    description: Actor's spot balance and ledger. Merchant or sub-user context.
+  - name: Deposits
+    description: Fund the actor's wallet via Gate Pay, on-ramp (card), or self-hosted EVM crypto. Merchant or sub-user context.
+  - name: Market
+    description: Catalog search, listings, buy / quick-buy, and the actor's own trades. Merchant or sub-user context.
   - name: WebSocket
-    description: Real-time trade and deposit events. Sub-user context.
+    description: Real-time trade and deposit events for a single sub-user (consumer-facing). Sub-user context only.
 
 security:
   - apiKeyAuth: []
@@ -212,7 +206,7 @@ components:
       type: object
       required: [code, key, message]
       properties:
-        code: { type: integer, example: 1700 }
+        code: { type: integer, example: 1500 }
         key: { type: string, example: INSUFFICIENT_BALANCE }
         message: { type: string, example: Insufficient balance }
       additionalProperties: true
@@ -233,11 +227,7 @@ components:
     WalletStatus: { type: string, enum: [active, suspended, closed] }
     TradeStatus:
       type: string
-      enum: [initiated, pending, active, hold, completed, failed, reverted]
-    TradeStatusUpper:
-      type: string
       enum: [INITIATED, PENDING, ACTIVE, HOLD, COMPLETED, FAILED, REVERTED]
-      description: Uppercased TradeStatus returned by the trade endpoints.
     DepositStatus:
       type: string
       enum: [initiated, pending, completed, partial, expired, cancelled, refunded, failed]
@@ -318,8 +308,8 @@ components:
           properties:
             tradeCount: { type: integer }
             gmv: { type: number }
-            gmvCents: { type: string, description: bigint cents serialized as a decimal string. }
-            feesEarnedCents: { type: string }
+            gmvCents: { type: integer, description: GMV in USD cents. }
+            feesEarnedCents: { type: integer }
             feesEarned: { type: number }
             spotBalance: { type: number }
             earningsBalance: { type: number }
@@ -335,10 +325,10 @@ components:
               email: { type: [string, "null"] }
               externalId: { type: [string, "null"] }
               tradeCount: { type: integer }
-              gmvCents: { type: string }
+              gmvCents: { type: integer }
               gmv: { type: number }
               balance: { type: number }
-              feesContributedCents: { type: string }
+              feesContributedCents: { type: integer }
         byStatus:
           type: object
           additionalProperties: { type: integer }
@@ -365,9 +355,9 @@ components:
 
     SubUserListResponse:
       type: object
-      required: [users, total, page, limit, totalPages]
+      required: [items, total, page, limit, totalPages]
       properties:
-        users:
+        items:
           type: array
           items: { $ref: '#/components/schemas/SubUserListItem' }
         total: { type: integer }
@@ -394,7 +384,7 @@ components:
 
     CreateSubUserResponse:
       type: object
-      required: [id, email, steamId, externalId, status, feeBps, createdAt, currency]
+      required: [id, email, steamId, externalId, status, feeBps, createdAt, currency, idempotent]
       properties:
         id: { type: string, format: uuid }
         email: { type: [string, "null"] }
@@ -404,10 +394,16 @@ components:
         feeBps: { type: [integer, "null"] }
         createdAt: { type: string, format: date-time }
         currency: { $ref: '#/components/schemas/Currency' }
+        idempotent:
+          type: boolean
+          description: |
+            True when the response replays a prior successful create with the
+            same `externalId`. The returned user is the existing one — no new
+            sub-user was created.
 
     SubUserResponse:
       type: object
-      required: [id, email, steamId, externalId, status, feeBps, createdAt, wallets]
+      required: [id, email, steamId, externalId, status, feeBps, createdAt, wallet]
       properties:
         id: { type: string, format: uuid }
         email: { type: [string, "null"] }
@@ -416,19 +412,19 @@ components:
         status: { $ref: '#/components/schemas/UserStatus' }
         feeBps: { type: [integer, "null"] }
         createdAt: { type: string, format: date-time }
-        wallets:
-          type: array
-          items:
-            type: object
-            required: [type, status, currency, balance]
-            properties:
-              type: { $ref: '#/components/schemas/WalletType' }
-              status: { $ref: '#/components/schemas/WalletStatus' }
-              currency:
-                oneOf:
-                  - $ref: '#/components/schemas/Currency'
-                  - type: "null"
-              balance: { type: number }
+        wallet:
+          oneOf:
+            - type: object
+              required: [type, status, currency, balance]
+              properties:
+                type: { $ref: '#/components/schemas/WalletType' }
+                status: { $ref: '#/components/schemas/WalletStatus' }
+                currency:
+                  oneOf:
+                    - $ref: '#/components/schemas/Currency'
+                    - type: "null"
+                balance: { type: number }
+            - type: "null"
 
     FundBody:
       type: object
@@ -490,9 +486,9 @@ components:
 
     TransactionHistory:
       type: object
-      required: [transactions, nextCursor]
+      required: [items, nextCursor]
       properties:
-        transactions:
+        items:
           type: array
           items: { $ref: '#/components/schemas/TransactionItem' }
         nextCursor: { type: [string, "null"] }
@@ -969,18 +965,12 @@ components:
 
     ListingsResponse:
       type: object
-      required: [listings, total]
+      required: [items, total]
       properties:
-        listings:
+        items:
           type: array
           items: { $ref: '#/components/schemas/MarketListing' }
         total: { type: integer }
-
-    ListingDetailResponse:
-      type: object
-      required: [listing]
-      properties:
-        listing: { $ref: '#/components/schemas/MarketListing' }
 
     # ─────────────────────────────────────────────────────────────────────
     # Trades
@@ -1024,7 +1014,7 @@ components:
       required: [id, status, itemCount, totalPrice, createdAt]
       properties:
         id: { type: string, format: uuid }
-        status: { $ref: '#/components/schemas/TradeStatusUpper' }
+        status: { $ref: '#/components/schemas/TradeStatus' }
         itemCount: { type: integer }
         totalPrice: { type: number }
         createdAt: { type: string }
@@ -1048,7 +1038,7 @@ components:
           description: Requested unit count. The server picks the cheapest matching listings.
         delivery:
           type: string
-          enum: [auto, manual]
+          enum: [STANDARD, INSTANT]
         tradeUrl: { type: string, format: uri }
         externalId: { type: string, maxLength: 128 }
 
@@ -1057,7 +1047,7 @@ components:
       required: [id, status, requestedCount, itemCount, totalPrice, createdAt]
       properties:
         id: { type: string, format: uuid }
-        status: { $ref: '#/components/schemas/TradeStatusUpper' }
+        status: { $ref: '#/components/schemas/TradeStatus' }
         requestedCount: { type: integer }
         itemCount:
           type: integer
@@ -1115,9 +1105,9 @@ components:
         userId: { type: string }
         steamId: { type: string }
         tradeUrl: { type: string }
-        offerID: { type: string }
+        offerId: { type: string }
         externalId: { type: string }
-        status: { $ref: '#/components/schemas/TradeStatusUpper' }
+        status: { $ref: '#/components/schemas/TradeStatus' }
         game: { type: string, example: "730" }
         items:
           type: array
@@ -1140,16 +1130,13 @@ components:
 
     TransactionListResponse:
       type: object
-      description: Sub-user transaction list (`/market/transactions`).
-      required: [trades, total, page, limit, totalPages]
+      description: Sub-user transaction list (`/market/trades`). Cursor-paginated.
+      required: [items, nextCursor]
       properties:
-        trades:
+        items:
           type: array
           items: { $ref: '#/components/schemas/Trade' }
-        total: { type: integer }
-        page: { type: integer }
-        limit: { type: integer }
-        totalPages: { type: integer }
+        nextCursor: { type: [string, "null"] }
 
     MerchantTradeListResponse:
       type: object
@@ -1406,7 +1393,7 @@ paths:
   /merchant:
     get:
       operationId: getMerchantProfile
-      tags: [Merchant Profile]
+      tags: [Account]
       summary: Get merchant profile
       description: |
         **Auth context:** merchant only. `On-Behalf-Of` rejected.
@@ -1430,7 +1417,7 @@ paths:
   /merchant/fees:
     get:
       operationId: getMerchantFees
-      tags: [Merchant Fees]
+      tags: [Account]
       summary: Read merchant fee configuration
       description: |
         **Auth context:** merchant only.
@@ -1458,7 +1445,7 @@ paths:
   /merchant/stats:
     get:
       operationId: getMerchantStats
-      tags: [Merchant Stats]
+      tags: [Account]
       summary: Aggregate stats (GMV, fees earned, top sub-users, status breakdown)
       description: |
         **Auth context:** merchant only.
@@ -1488,7 +1475,7 @@ paths:
   /merchant/users:
     get:
       operationId: listSubUsers
-      tags: [Sub-users]
+      tags: [Users]
       summary: List sub-users
       description: '**Auth context:** merchant only.'
       parameters:
@@ -1514,7 +1501,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createSubUser
-      tags: [Sub-users]
+      tags: [Users]
       summary: Create a sub-user
       description: |
         **Auth context:** merchant only. **Rate limit: 100/min.**
@@ -1556,7 +1543,7 @@ paths:
         schema: { type: string, minLength: 1, maxLength: 128 }
     get:
       operationId: getSubUser
-      tags: [Sub-users]
+      tags: [Users]
       summary: Get a sub-user
       description: '**Auth context:** merchant only.'
       responses:
@@ -1575,7 +1562,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteSubUser
-      tags: [Sub-users]
+      tags: [Users]
       summary: Soft-delete a sub-user
       description: |
         **Auth context:** merchant only. **Rate limit: 30/min.**
@@ -1595,7 +1582,7 @@ paths:
   /merchant/users/{id}/suspend:
     post:
       operationId: suspendSubUser
-      tags: [Sub-users]
+      tags: [Users]
       summary: Suspend a sub-user
       description: '**Auth context:** merchant only. **Rate limit: 30/min.** Login + buy blocked while suspended.'
       parameters:
@@ -1613,7 +1600,7 @@ paths:
   /merchant/users/{id}/reactivate:
     post:
       operationId: reactivateSubUser
-      tags: [Sub-users]
+      tags: [Users]
       summary: Reactivate a suspended sub-user
       description: '**Auth context:** merchant only. **Rate limit: 30/min.**'
       parameters:
@@ -1631,7 +1618,7 @@ paths:
   /merchant/users/{id}/fund:
     post:
       operationId: fundSubUser
-      tags: [Sub-users]
+      tags: [Users]
       summary: Move funds from merchant spot wallet to sub-user wallet
       description: |
         **Auth context:** merchant only. **Rate limit: 100 / 5min.**
@@ -1641,9 +1628,9 @@ paths:
         merchant's spot currency.
 
         Common error keys:
-        - `INSUFFICIENT_BALANCE` (1700)
-        - `TRANSFER_CURRENCY_MISMATCH` (1710)
-        - `IDEMPOTENCY_KEY_REQUIRED` (1705) / `IDEMPOTENCY_CONFLICT` (1704)
+        - `INSUFFICIENT_BALANCE` (1500)
+        - `TRANSFER_CURRENCY_MISMATCH` (1520)
+        - `IDEMPOTENCY_KEY_REQUIRED` (1511) / `IDEMPOTENCY_CONFLICT` (1510)
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -1675,7 +1662,7 @@ paths:
   /merchant/wallet:
     get:
       operationId: getMerchantWallet
-      tags: [Merchant Wallet]
+      tags: [Account]
       summary: Read merchant balance (spot or earnings)
       description: |
         **Auth context:** merchant only.
@@ -1703,7 +1690,7 @@ paths:
   /merchant/ledger:
     get:
       operationId: getMerchantLedger
-      tags: [Merchant Wallet]
+      tags: [Account]
       summary: Merchant ledger (cursor-paginated)
       description: '**Auth context:** merchant only. Postings against the merchant''s spot or earnings wallet.'
       parameters:
@@ -1733,7 +1720,7 @@ paths:
   /merchant/users/{id}/wallet:
     get:
       operationId: getSubUserWallet
-      tags: [Merchant Wallet]
+      tags: [Users]
       summary: Read a sub-user's spot wallet
       description: |
         **Auth context:** merchant only.
@@ -1760,7 +1747,7 @@ paths:
   /merchant/users/{id}/ledger:
     get:
       operationId: getSubUserLedger
-      tags: [Merchant Wallet]
+      tags: [Users]
       summary: Sub-user ledger (cursor-paginated)
       description: |
         **Auth context:** merchant only.
@@ -1797,7 +1784,7 @@ paths:
   /merchant/trades:
     get:
       operationId: listMerchantTrades
-      tags: [Merchant Trades]
+      tags: [Trades]
       summary: List trades across the merchant scope
       description: |
         **Auth context:** merchant only. Cursor-paginated.
@@ -1835,7 +1822,7 @@ paths:
   /merchant/trades/{id}:
     get:
       operationId: getMerchantTrade
-      tags: [Merchant Trades]
+      tags: [Trades]
       summary: Get a single trade in merchant scope
       description: '**Auth context:** merchant only.'
       parameters:
@@ -1858,7 +1845,7 @@ paths:
   /merchant/users/{id}/trades:
     get:
       operationId: listSubUserTrades
-      tags: [Merchant Trades]
+      tags: [Users]
       summary: List trades for a single sub-user
       description: '**Auth context:** merchant only. Same filters as `/merchant/trades` minus `subUserId`.'
       parameters:
@@ -1895,7 +1882,7 @@ paths:
   /user:
     get:
       operationId: getUserProfile
-      tags: [Sub-user Profile]
+      tags: [Profile]
       summary: Get sub-user profile
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required.
@@ -1921,7 +1908,7 @@ paths:
   /user/settings/tradeurls:
     get:
       operationId: listTradeUrls
-      tags: [Sub-user Profile]
+      tags: [Trade URLs]
       summary: List the sub-user's Steam trade URLs
       description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
       parameters:
@@ -1941,14 +1928,14 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: addTradeUrl
-      tags: [Sub-user Profile]
+      tags: [Trade URLs]
       summary: Add a Steam trade URL
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
         Server resolves the SteamID and persona via Steam — request can fail with
-        `TRADEURL_INVALID_TOKEN` (1321) if the trade URL is invalid, expired, or the
-        Steam profile / inventory is private. `TRADEURL_ESCROW` (1322) if the account
+        `TRADEURL_INVALID_TOKEN` (1413) if the trade URL is invalid, expired, or the
+        Steam profile / inventory is private. `TRADEURL_ESCROW` (1414) if the account
         has trade hold enabled.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
@@ -1979,7 +1966,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     patch:
       operationId: updateTradeUrl
-      tags: [Sub-user Profile]
+      tags: [Trade URLs]
       summary: Update a trade URL (rotate URL or set primary)
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
@@ -2009,7 +1996,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
     delete:
       operationId: deleteTradeUrl
-      tags: [Sub-user Profile]
+      tags: [Trade URLs]
       summary: Delete a trade URL
       description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**'
       responses:
@@ -2029,7 +2016,7 @@ paths:
   /user/wallet/balance:
     get:
       operationId: getUserBalance
-      tags: [Sub-user Wallet]
+      tags: [Wallet]
       summary: Sub-user spot balance
       description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
       parameters:
@@ -2048,10 +2035,10 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
-  /user/wallet/transactions:
+  /user/wallet/ledger:
     get:
       operationId: listUserTransactions
-      tags: [Sub-user Wallet]
+      tags: [Wallet]
       summary: Sub-user transaction ledger (cursor-paginated)
       description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
       parameters:
@@ -2079,7 +2066,7 @@ paths:
   /user/wallet/deposit/gate/chains:
     get:
       operationId: getGateDepositChains
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Supported Gate Pay deposit currencies + chains
       description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
       parameters:
@@ -2101,7 +2088,7 @@ paths:
   /user/wallet/deposit/gate/quote:
     post:
       operationId: quoteGateDeposit
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Quote a Gate Pay deposit
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
@@ -2134,7 +2121,7 @@ paths:
   /user/wallet/deposit/gate:
     post:
       operationId: createGateDeposit
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Create a Gate Pay deposit from a quote
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
@@ -2172,7 +2159,7 @@ paths:
   /user/wallet/deposit/onramp/quote:
     post:
       operationId: quoteOnrampDeposit
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Quote a card on-ramp deposit
       description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**'
       parameters:
@@ -2201,7 +2188,7 @@ paths:
   /user/wallet/deposit/onramp/session:
     post:
       operationId: createOnrampSession
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Create a hosted card-payment session
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
@@ -2238,7 +2225,7 @@ paths:
   /user/wallet/deposit/crypto/address:
     get:
       operationId: getCryptoDepositAddress
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Get the sub-user's deposit address
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required.
@@ -2266,7 +2253,7 @@ paths:
   /user/wallet/deposit/crypto/quote:
     post:
       operationId: quoteCryptoDeposit
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Preview crypto deposit value across chains
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
@@ -2302,7 +2289,7 @@ paths:
   /user/wallet/deposit/{id}/cancel:
     post:
       operationId: cancelDeposit
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Cancel a pending deposit
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required.
@@ -2331,7 +2318,7 @@ paths:
   /user/wallet/deposit/{id}/resume:
     post:
       operationId: resumeDeposit
-      tags: [Sub-user Deposits]
+      tags: [Deposits]
       summary: Resume an in-progress deposit
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required.
@@ -2362,7 +2349,7 @@ paths:
   /market/search/suggestions:
     get:
       operationId: getMarketSearchSuggestions
-      tags: [Catalog]
+      tags: [Market]
       summary: Type-ahead suggestions for item search
       description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**'
       parameters:
@@ -2386,7 +2373,7 @@ paths:
   /market/search:
     get:
       operationId: searchMarket
-      tags: [Catalog]
+      tags: [Market]
       summary: Search items in the catalog
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
@@ -2410,7 +2397,7 @@ paths:
         - { name: priceMax, in: query, schema: { type: number, minimum: 0 } }
         - name: sort
           in: query
-          schema: { type: string, enum: [relevance, name_asc, name_desc, price_asc, price_desc], default: relevance }
+          schema: { type: string, enum: [relevance, nameAsc, nameDesc, priceAsc, priceDesc], default: relevance }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
       responses:
@@ -2431,7 +2418,7 @@ paths:
   /market/items/{itemId}:
     get:
       operationId: getMarketItem
-      tags: [Catalog]
+      tags: [Market]
       summary: Get item detail
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
@@ -2460,10 +2447,10 @@ paths:
   # ─────────────────────────────────────────────────────────────────────
   # LISTINGS
   # ─────────────────────────────────────────────────────────────────────
-  /market/listings/{itemId}:
+  /market/items/{itemId}/listings:
     get:
       operationId: listItemListings
-      tags: [Listings]
+      tags: [Market]
       summary: List live marketplace offers for an item
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
@@ -2501,10 +2488,10 @@ paths:
         '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
-  /market/listing/{listingId}:
+  /market/listings/{listingId}:
     get:
       operationId: getMarketListing
-      tags: [Listings]
+      tags: [Market]
       summary: Get a single listing by ID
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
@@ -2524,7 +2511,7 @@ paths:
                   - $ref: '#/components/schemas/Envelope'
                   - type: object
                     properties:
-                      data: { $ref: '#/components/schemas/ListingDetailResponse' }
+                      data: { $ref: '#/components/schemas/MarketListing' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -2536,7 +2523,7 @@ paths:
   /market/buy:
     post:
       operationId: buyMarketItems
-      tags: [Trading]
+      tags: [Market]
       summary: Buy specific listings (1–10 at a time)
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
@@ -2549,8 +2536,8 @@ paths:
         Trade then runs through marketplace workers. Subscribe to `trade.*` WS
         events for status updates.
 
-        Common error keys: `INSUFFICIENT_BALANCE` (1700), `LISTING_NOT_FOUND` (1858),
-        `PRICE_MISMATCH` (1854), `TRADEURL_REQUIRED` (1855), `MARKET_UNAVAILABLE` (1850).
+        Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
+        `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
       requestBody:
@@ -2577,7 +2564,7 @@ paths:
   /market/buy/quick:
     post:
       operationId: quickBuyMarketItem
-      tags: [Trading]
+      tags: [Market]
       summary: Buy N units of an item — server picks the cheapest matching listings
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
@@ -2609,15 +2596,15 @@ paths:
         '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
-  /market/transactions:
+  /market/trades:
     get:
       operationId: listMarketTransactions
-      tags: [Trading]
+      tags: [Market]
       summary: List the sub-user's trades
-      description: '**Auth context:** sub-user — `On-Behalf-Of` required. Page-paginated.'
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required. Cursor-paginated.'
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
-        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
         - name: status
           in: query
@@ -2636,10 +2623,10 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
-  /market/transactions/{tradeId}:
+  /market/trades/{tradeId}:
     get:
       operationId: getMarketTransaction
-      tags: [Trading]
+      tags: [Market]
       summary: Get a single trade
       description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
       parameters:
@@ -2660,10 +2647,10 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /market/transactions/{tradeId}/items/{itemId}/cancel:
+  /market/trades/{tradeId}/items/{itemId}/cancel:
     post:
       operationId: cancelMarketTransactionItem
-      tags: [Trading]
+      tags: [Market]
       summary: Cancel a single in-progress item on a Trade
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**

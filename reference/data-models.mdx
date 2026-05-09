@@ -1,12 +1,12 @@
 ---
 title: "Data models"
-description: "TypeScript types for every shape returned by the API. Generated equivalents are available via openapi-typescript."
+description: "TypeScript types for every shape returned by the API. Generated equivalents are available via openapi-typescript or the official SDK."
 ---
 
-These types mirror the OpenAPI `data` shapes — what's inside `body.data`
-on a successful envelope. Generate them with `openapi-typescript`
-([TypeScript types guide](/guides/sdk)) for hands-off updates, or copy
-the snippets below for ad-hoc use.
+These types mirror the OpenAPI `data` shapes — what's inside `body.data` on a
+successful envelope. Generate them with `openapi-typescript`
+([TypeScript types guide](/guides/sdk)) or import from
+`@skinshark/sdk/types`.
 
 ## Enums
 
@@ -21,20 +21,25 @@ type WalletType = "spot" | "earnings";
 
 type WalletStatus = "active" | "suspended" | "closed";
 
+// Trade-related enums are UPPERCASE on the wire.
 type TradeStatus =
-  | "initiated"
-  | "pending"
-  | "active"
-  | "hold"
-  | "completed"
-  | "failed"
-  | "reverted";
+  | "INITIATED"
+  | "PENDING"
+  | "ACTIVE"
+  | "HOLD"
+  | "COMPLETED"
+  | "FAILED"
+  | "REVERTED";
 
-// Returned by the trade endpoints, uppercase.
-type TradeStatusUpper = Uppercase<TradeStatus>;
+type TradeType = "BUY" | "SELL";
 
-type TradeType = "buy" | "sell";
+type ItemPurchaseStatus = TradeStatus;  // same value set, per-item
 
+type RevertedBy = "SUPPLIER" | "USER";
+
+type DeliveryMode = "STANDARD" | "INSTANT";
+
+// Everything else stays lowercase.
 type DepositStatus =
   | "initiated"
   | "pending"
@@ -56,6 +61,20 @@ type CryptoEvmChain = "ethereum" | "base" | "arbitrum" | "optimism" | "bsc";
 type CryptoNativeToken = "USDT" | "USDC" | "NATIVE";
 
 type TwoFactorMethod = "email" | "totp";
+
+// CS2 community labels keep their natural casing.
+type ItemCategory = "Normal" | "StatTrak" | "Souvenir";
+type DopplerPhase =
+  | "Phase 1"
+  | "Phase 2"
+  | "Phase 3"
+  | "Phase 4"
+  | "Ruby"
+  | "Sapphire"
+  | "Black Pearl"
+  | "Emerald";
+
+type SearchSort = "relevance" | "nameAsc" | "nameDesc" | "priceAsc" | "priceDesc";
 ```
 
 ## Envelope
@@ -113,8 +132,8 @@ interface MerchantStats {
   totals: {
     tradeCount: number;
     gmv: number;
-    gmvCents: string;
-    feesEarnedCents: string;
+    gmvCents: number;            // exact integer cents
+    feesEarnedCents: number;
     feesEarned: number;
     spotBalance: number;
     earningsBalance: number;
@@ -125,10 +144,10 @@ interface MerchantStats {
     email: string | null;
     externalId: string | null;
     tradeCount: number;
-    gmvCents: string;
+    gmvCents: number;
     gmv: number;
     balance: number;
-    feesContributedCents: string;
+    feesContributedCents: number;
   }>;
   byStatus: Partial<Record<TradeStatus, number>>;
 }
@@ -156,10 +175,18 @@ interface SubUserListItem {
   createdAt: string;
 }
 
+interface SubUserListResponse {
+  items: SubUserListItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 interface CreateSubUserBody {
   email?: string;
   steamId?: string;            // SteamID64
-  externalId?: string;
+  externalId?: string;         // also acts as the idempotency key for create
   currency?: Currency;
 }
 
@@ -172,6 +199,8 @@ interface CreateSubUserResponse {
   feeBps: number | null;
   createdAt: string;
   currency: Currency;
+  /** True when the response replays a prior create with the same externalId. */
+  idempotent: boolean;
 }
 
 interface SubUserResponse {
@@ -182,12 +211,12 @@ interface SubUserResponse {
   status: UserStatus;
   feeBps: number | null;
   createdAt: string;
-  wallets: Array<{
+  wallet: {                    // single object — sub-users only have one wallet
     type: WalletType;
     status: WalletStatus;
     currency: Currency | null;
     balance: number;
-  }>;
+  } | null;
 }
 
 interface FundBody {
@@ -219,7 +248,7 @@ interface TransactionItem {
 }
 
 interface TransactionHistory {
-  transactions: TransactionItem[];
+  items: TransactionItem[];    // /user/wallet/ledger, /merchant/ledger
   nextCursor: string | null;
 }
 ```
@@ -248,20 +277,20 @@ interface TradeItem {
   }>;
   charm?: { name: string; pattern?: string; iconUrl: string };
   delivery?: string;
-  status: TradeStatusUpper;
+  status: ItemPurchaseStatus;
   tradable: boolean;
   error?: string;
 }
 
 interface Trade {
   id: string;
-  type: "BUY";
+  type: TradeType;
   userId: string;
   steamId: string;
   tradeUrl: string;
-  offerID?: string;
+  offerId?: string;
   externalId?: string;
-  status: TradeStatusUpper;
+  status: TradeStatus;
   game: string;                // "730"
   items: TradeItem[];
   summary: { total: number; completed: number; failed: number };
@@ -269,13 +298,14 @@ interface Trade {
   currency: Currency;
   holdEndDate?: string;
   settledAt?: string;
-  revertedBy?: "SUPPLIER" | "USER";
+  revertedBy?: RevertedBy;
   error?: string;
   createdAt: string;
   updatedAt: string;
 }
 
-interface MerchantTradeListResponse {
+// /merchant/trades, /merchant/users/{id}/trades, /market/trades
+interface TradeListResponse {
   items: Trade[];
   nextCursor: string | null;
 }
@@ -288,12 +318,12 @@ interface BuyItem {
 interface BuyBody {
   items: BuyItem[];            // 1–10
   tradeUrl?: string;
-  externalId?: string;
+  externalId?: string;         // your correlation id; replays return the same Trade
 }
 
 interface BuyResponse {
   id: string;
-  status: TradeStatusUpper;
+  status: TradeStatus;         // "INITIATED" right after buy
   itemCount: number;
   totalPrice: number;
   createdAt: string;
@@ -303,14 +333,14 @@ interface QuickBuyBody {
   itemId: string;
   maxPrice: string;
   amount: number;              // 1–200
-  delivery: "auto" | "manual";
+  delivery: DeliveryMode;
   tradeUrl?: string;
   externalId?: string;
 }
 
 interface QuickBuyResponse {
   id: string;
-  status: TradeStatusUpper;
+  status: TradeStatus;
   requestedCount: number;
   itemCount: number;
   totalPrice: number;
@@ -346,7 +376,7 @@ interface SearchResultItem {
   wear?: string;
   rarity?: string;
   rarityColor?: string;
-  category?: "Normal" | "StatTrak" | "Souvenir";
+  category?: ItemCategory;
   collection?: string;
   floatRange?: [number, number];
   price?: number;
@@ -374,16 +404,16 @@ interface MarketListing {
   rarity?: string;
   collection?: string;
   color?: string;
-  wear?: string | null;
+  wear?: number | null;
   paintSeed?: number | null;
-  doppler?: { status: number; name: string; paintIndex: number };
+  doppler?: { status: number; name: string; paintIndex?: number };
   fade?: { percentage: number };
   hardened?: { status: number; name: string };
   stickers?: Array<{
     name: string;
     marketHashName?: string;
     slot: number;
-    wear: number;
+    wear?: number;
     iconUrl: string;
   }>;
   charm?: {
@@ -395,6 +425,15 @@ interface MarketListing {
   inspectUrl?: string;
   delivery?: string;
 }
+
+// /market/items/{itemId}/listings
+interface ListingsResponse {
+  items: MarketListing[];
+  total: number;
+}
+
+// /market/listings/{listingId} — bare resource, no wrapper
+type ListingDetail = MarketListing;
 ```
 
 ## Deposits
@@ -575,5 +614,5 @@ type WsEvent =
   ;
 ```
 
-For exhaustive type coverage, generate types from the OpenAPI spec —
-that's the canonical source.
+For exhaustive type coverage, generate types from the OpenAPI spec or use the
+`@skinshark/sdk/types` subpath — that's the canonical source.

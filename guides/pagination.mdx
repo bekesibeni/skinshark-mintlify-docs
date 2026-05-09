@@ -7,6 +7,8 @@ The API uses two pagination styles. Each endpoint commits to one — the
 choice reflects the underlying query, not a preference. Don't try to pass
 both.
 
+Every list response uses the field name **`items`** for the array.
+
 ## Page-based
 
 Used for stable, count-bounded lists where you want to jump to a page or
@@ -20,7 +22,7 @@ Response:
 
 ```ts
 interface PageResult<T> {
-  users: T[];        // or `items` — depends on endpoint
+  items: T[];
   total: number;     // total matching across all pages
   page: number;      // echoed
   limit: number;     // echoed
@@ -30,8 +32,9 @@ interface PageResult<T> {
 
 Endpoints that use this:
 
-- `GET /merchant/users` (returns `users: …`)
-- `GET /market/search` (returns `items: …`)
+- `GET /merchant/users`
+- `GET /market/search`
+- `GET /market/items/{itemId}/listings`
 
 ## Cursor-based
 
@@ -71,9 +74,8 @@ Endpoints that use this:
 
 - `GET /merchant/trades`, `GET /merchant/users/{id}/trades`
 - `GET /merchant/ledger`, `GET /merchant/users/{id}/ledger`
-- `GET /user/wallet/transactions`
-- `GET /market/transactions`
-- WebSocket delivery list (admin only — not in this doc)
+- `GET /user/wallet/ledger`
+- `GET /market/trades`
 
 ## Why two styles
 
@@ -100,7 +102,7 @@ async function findCompletedTrade(externalId: string): Promise<Trade | null> {
   let cursor: string | undefined;
   for (let i = 0; i < 10; i++) {  // bound the search
     const page = await api<{ items: Trade[]; nextCursor: string | null }>(
-      `/merchant/trades?status=completed&externalId=${externalId}&limit=50` +
+      `/merchant/trades?status=COMPLETED&externalId=${externalId}&limit=50` +
         (cursor ? `&cursor=${cursor}` : ""),
     );
     const hit = page.items.find((t) => t.externalId === externalId);
