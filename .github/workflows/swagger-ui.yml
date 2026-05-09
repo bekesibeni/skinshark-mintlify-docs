@@ -51,6 +51,8 @@ jobs:
           sed -i 's|https://petstore\.swagger\.io/v2/swagger\.json|openapi.yaml|g' _site/swagger-initializer.js
           # Tweak page title.
           sed -i 's|<title>Swagger UI</title>|<title>SkinShark Merchant API — Swagger UI</title>|' _site/index.html
+          # Skip Jekyll on Pages — publish HTML/CSS/JS as-is.
+          touch _site/.nojekyll
 
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
