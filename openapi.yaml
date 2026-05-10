@@ -1059,7 +1059,13 @@ components:
       type: object
       required: [id, name, marketHashName, type, iconUrl, price]
       properties:
-        id: { type: string }
+        id:
+          type: string
+          format: uuid
+          description: >
+            Listing id — the same id returned by listing endpoints
+            (`GET /market/items/{itemId}/listings`, `GET /market/listings/{id}`).
+            Use this id when calling the cancel endpoint.
         name: { type: [string, "null"] }
         marketHashName: { type: [string, "null"] }
         type: { type: [string, "null"] }
@@ -1150,10 +1156,12 @@ components:
 
     CancelItemResponse:
       type: object
-      required: [ok, itemId, status]
+      required: [itemId, status]
       properties:
-        ok: { type: boolean, enum: [true] }
-        itemId: { type: string, format: uuid }
+        itemId:
+          type: string
+          format: uuid
+          description: Listing id of the cancelled item — same id you passed in the URL.
         status: { type: string, enum: [cancelled, failed] }
 
     # ─────────────────────────────────────────────────────────────────────
@@ -2660,7 +2668,11 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
         - { name: tradeId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
-        - { name: itemId, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: itemId
+          in: path
+          required: true
+          description: Listing id of the item to cancel — the `id` returned in `Trade.items[].id` and from listing endpoints.
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: OK.
