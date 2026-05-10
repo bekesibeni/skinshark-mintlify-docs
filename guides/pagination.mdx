@@ -102,7 +102,7 @@ async function findCompletedTrade(externalId: string): Promise<Trade | null> {
   let cursor: string | undefined;
   for (let i = 0; i < 10; i++) {  // bound the search
     const page = await api<{ items: Trade[]; nextCursor: string | null }>(
-      `/merchant/trades?status=COMPLETED&externalId=${externalId}&limit=50` +
+      `/merchant/trades?status=completed&externalId=${externalId}&limit=50` +
         (cursor ? `&cursor=${cursor}` : ""),
     );
     const hit = page.items.find((t) => t.externalId === externalId);

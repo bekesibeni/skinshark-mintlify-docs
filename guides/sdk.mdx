@@ -183,7 +183,7 @@ const sub = await call("post", "/merchant/users", {
 //    ^? { id: string; externalId: string | null; idempotent: boolean; ... }
 
 const trades = await call("get", "/merchant/trades", {
-  query: { status: "COMPLETED", limit: "50" },
+  query: { status: "completed", limit: "50" },
 });
 //    ^? { items: Trade[]; nextCursor: string | null }
 ```

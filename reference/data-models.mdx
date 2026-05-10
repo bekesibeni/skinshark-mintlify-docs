@@ -21,25 +21,21 @@ type WalletType = "spot" | "earnings";
 
 type WalletStatus = "active" | "suspended" | "closed";
 
-// Trade-related enums are UPPERCASE on the wire.
 type TradeStatus =
-  | "INITIATED"
-  | "PENDING"
-  | "ACTIVE"
-  | "HOLD"
-  | "COMPLETED"
-  | "FAILED"
-  | "REVERTED";
+  | "initiated"
+  | "pending"
+  | "active"
+  | "hold"
+  | "completed"
+  | "failed"
+  | "reverted";
 
-type TradeType = "BUY" | "SELL";
+type TradeType = "buy" | "sell";
 
-type ItemPurchaseStatus = TradeStatus;  // same value set, per-item
+type RevertedBy = "supplier" | "user";
 
-type RevertedBy = "SUPPLIER" | "USER";
+type DeliveryMode = "standard" | "instant";
 
-type DeliveryMode = "STANDARD" | "INSTANT";
-
-// Everything else stays lowercase.
 type DepositStatus =
   | "initiated"
   | "pending"
@@ -277,7 +273,7 @@ interface TradeItem {
   }>;
   charm?: { name: string; pattern?: string; iconUrl: string };
   delivery?: string;
-  status: ItemPurchaseStatus;
+  status: TradeStatus;
   tradable: boolean;
   error?: string;
 }
@@ -323,7 +319,7 @@ interface BuyBody {
 
 interface BuyResponse {
   id: string;
-  status: TradeStatus;         // "INITIATED" right after buy
+  status: TradeStatus;         // "initiated" right after buy
   itemCount: number;
   totalPrice: number;
   createdAt: string;

@@ -1,87 +1,121 @@
 ---
 title: "Rate limits"
-description: "Per-endpoint limits, the headers we return, and how to back off cleanly."
+description: "Tier-based aggregate budget, per-route caps, and how to back off cleanly."
 ---
 
-Rate limits are enforced per merchant API key on a sliding window. Limits
-are documented per-endpoint in the [API reference](/api-reference) — this
-page summarises the patterns and the response shape.
+The platform enforces two complementary limits on every authenticated
+request:
 
-## Limits by endpoint group
+1. **Aggregate tier budget** — a per-merchant token bucket sized by your
+   plan. Every request consumes at least one token; expensive endpoints
+   consume more.
+2. **Per-route caps** — tight per-key (or per-IP for unauth flows)
+   limits on specific sensitive routes, layered on top of the budget.
 
-The values below come from the route handlers' `rateLimit.config`. Treat
-them as the contract; if a real-world spike pushes you against them, file
-a request to raise the cap rather than working around it client-side.
+Both must permit the request; if either is exhausted you get `429`.
 
-### Sub-user provisioning + funding
+## Aggregate tier budget
 
-| Endpoint | Window | Limit |
+Tokens refill on a sliding 60-second window. Sub-users share the
+merchant's bucket — sub-user count never multiplies your budget.
+
+| Tier | Tokens / minute |
+|---|---|
+| `standard` | 60 |
+| `premium` | 180 |
+| `enterprise` | 360 |
+
+Each request deducts from the bucket according to its cost class:
+
+| Class | Cost | Endpoints |
 |---|---|---|
-| `POST /merchant/users` (create) | 1 min | 100 |
-| `POST /merchant/users/{id}/fund` | 5 min | 100 |
-| `POST /merchant/users/{id}/suspend` | 1 min | 30 |
-| `POST /merchant/users/{id}/reactivate` | 1 min | 30 |
-| `DELETE /merchant/users/{id}` | 1 min | 30 |
+| Cheap | 1 | All routes by default — reads, profile, settings, normal writes, sub-user CRUD, etc. |
+| Expensive | 5 | The five worker-fanout / external-API endpoints listed below. |
 
-### Trading
+The expensive endpoints — these dispatch to marketplace workers or hit
+external-marketplace APIs, so each call costs 5 tokens against your
+tier budget:
 
-| Endpoint | Window | Limit |
+| Method | Path |
+|---|---|
+| `GET` | `/market/items/{itemId}/listings` |
+| `GET` | `/market/listings/{listingId}` |
+| `POST` | `/market/buy` |
+| `POST` | `/market/buy/quick` |
+| `POST` | `/market/trades/{tradeId}/items/{itemId}/cancel` |
+
+So a `standard` merchant (60 tokens / minute) can burn the whole budget
+on 60 cheap calls or 12 expensive ones, or any mix in between. A
+`premium` merchant gets 36 expensive calls; `enterprise` gets 72.
+Need more? Upgrade tier or contact support.
+
+## Per-route caps
+
+Independent of the tier budget, these tighter limits apply on specific
+endpoints. They use their own counters — exhausting one doesn't affect
+the others or the tier budget.
+
+### Sensitive merchant operations (per-merchant key)
+
+| Endpoint group | Window | Limit |
 |---|---|---|
-| `POST /market/buy` | 1 min | 100 |
-| `POST /market/buy/quick` | 1 min | 50 |
-| `POST /market/trades/{tradeId}/items/{itemId}/cancel` | 1 min | 50 |
+| API key create / revoke / rotate / IP-allowlist | 5 min | 5 |
+| Webhook secret create / rotate / revoke | 5 min | 5 |
+| Webhook URL set / test / revoke | 5 min | 10 |
+| Account settings (password, email change, delete) | 5 min | 5 / 10 |
+| Webhook event filter | 5 min | 20 |
+| Sub-user delete | 5 min | 20 |
+| Fee setting writes | 5 min | 20 |
 
-### Deposits
+### Normal writes (per-merchant key)
 
-| Endpoint | Window | Limit |
+`POST /merchant/users` (create), `POST /merchant/users/{id}/fund`,
+`POST /merchant/users/{id}/suspend|reactivate`, trade URL CRUD,
+API key name update.
+
+| Window | Limit |
+|---|---|
+| 1 min | 30 |
+
+### Public auth flow (per-IP)
+
+Login, register, refresh, password reset, email/2FA challenge, Discord
+OAuth start. Tighter per-IP caps to slow brute-force.
+
+| Endpoint group | Window | Limit |
 |---|---|---|
-| `POST /user/wallet/deposit/gate/quote` | 1 min | 100 |
-| `POST /user/wallet/deposit/gate` | 1 min | 50 |
-| `POST /user/wallet/deposit/onramp/quote` | 1 min | 100 |
-| `POST /user/wallet/deposit/onramp/session` | 1 min | 50 |
-| `POST /user/wallet/deposit/crypto/quote` | 1 min | 100 |
+| Login / Discord connect | 1 min | 10 |
+| Register | 1 min | 5 |
+| Verify (2FA, email) | 1 min | 5 |
+| Resend (email codes) | 1 min | 3 |
+| Password reset request | 1 hour | 3 |
+| Password reset confirm | 15 min | 5 |
+| Refresh access token | 1 min | 30 |
 
-### Sub-user trade URLs
+### Webhooks (per-IP)
 
-| Endpoint | Window | Limit |
-|---|---|---|
-| `POST /user/settings/tradeurls` | 1 min | 100 |
-| `PATCH /user/settings/tradeurls/{id}` | 1 min | 100 |
-| `DELETE /user/settings/tradeurls/{id}` | 1 min | 100 |
-
-### Catalog reads
-
-| Endpoint | Window | Limit |
-|---|---|---|
-| `GET /market/search/suggestions` | 1 min | 1000 |
-| `GET /market/search` | 1 min | 1000 |
-| `GET /market/items/{itemId}` | 1 min | 1000 |
-| `GET /market/items/{itemId}/listings` | 1 min | 200 |
-| `GET /market/listings/{listingId}` | 1 min | 100 |
-
-### Read endpoints (default)
-
-Profile, stats, ledger, trade reads fall under the default merchant
-limiter (much higher than per-route caps; treat as not rate-limited
-for normal traffic).
+Inbound provider webhooks (gatepay, onramp, crypto, marketplace
+callbacks): 60/min per source IP.
 
 ## Response headers
 
-Every response includes:
+For routes covered by a per-route cap, the standard rate-limit headers
+are returned on every response:
 
 | Header | Meaning |
 |---|---|
-| `x-ratelimit-limit` | Window cap. |
+| `x-ratelimit-limit` | Cap for this route. |
 | `x-ratelimit-remaining` | Calls left in the current window. |
 | `x-ratelimit-reset` | Epoch seconds at which the window resets. |
 
-When you hit the limit, the response is `429` with:
+The aggregate tier budget does **not** emit per-request headers — it
+only signals on rejection, via:
 
-| Header | Meaning |
-|---|---|
-| `retry-after` | Seconds to wait before retrying. |
-| `x-ratelimit-remaining: 0` | |
-| `x-ratelimit-reset` | Epoch seconds. |
+| Header | When | Meaning |
+|---|---|---|
+| `retry-after` | `429` only | Seconds until the bucket has room again. |
+
+The `429` body is the standard envelope:
 
 ```json
 {
@@ -97,6 +131,8 @@ When you hit the limit, the response is `429` with:
 
 ## Backing off
 
+Honour `retry-after` when present, otherwise use exponential backoff:
+
 ```ts
 async function withRateLimitRetry<T>(fn: () => Promise<Response>, body: () => Promise<T>): Promise<T> {
   for (let i = 0; i < 5; i++) {
@@ -104,22 +140,24 @@ async function withRateLimitRetry<T>(fn: () => Promise<Response>, body: () => Pr
     if (res.status !== 429) return body();
 
     const retryAfterHeader = res.headers.get("retry-after");
-    const seconds = retryAfterHeader ? Number(retryAfterHeader) : 1;
+    const seconds = retryAfterHeader ? Number(retryAfterHeader) : 2 ** i;
     await new Promise((r) => setTimeout(r, seconds * 1000));
   }
   throw new Error("rate limit retry exhausted");
 }
 ```
 
-## Per-IP limits
+## Per-IP caveats
 
-Beyond per-key limits, the platform applies a per-IP guard against
-brute-forcing auth endpoints. If you're calling from a single egress IP
-across many merchant keys (e.g. a multi-tenant proxy), you may hit IP
-limits before per-key limits — split egress IPs or contact support.
+If you're calling from a single egress IP across many merchant keys
+(e.g. a multi-tenant proxy), you may hit per-IP caps on auth endpoints
+before per-key caps. Split egress IPs or contact support.
 
 ## Request ID
 
-Every response (success or 429) includes the `request-id` header (also
-echoed in the envelope `requestId`). Include it in any rate-limit
-support request — it lets us trace the exact denial.
+Every response envelope carries a `requestId` field — include it in
+support tickets so we can trace the exact request:
+
+```json
+{ "requestId": "01900b...", "success": true, "data": { /* ... */ } }
+```
