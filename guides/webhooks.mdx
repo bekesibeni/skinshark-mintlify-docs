@@ -26,14 +26,15 @@ Webhook URLs and signing secrets are dashboard-only operations
 
 Trade lifecycle:
 
-- `trade.initiated`
-- `trade.active`
-- `trade.hold`
-- `trade.completed`
-- `trade.failed`
-- `trade.reverted`
-- `trade.settled`
-- `trade.refunded`
+- `trade.initiated` — buy accepted, escrow held, items not yet placed at the marketplace.
+- `trade.pending` — marketplace worker successfully placed the order; awaiting fulfillment.
+- `trade.active` — marketplace is processing/delivering.
+- `trade.hold` — items received, holding for the dispute window.
+- `trade.completed` — hold released, trade settled.
+- `trade.failed` — terminal failure (insufficient supply, marketplace decline, etc.).
+- `trade.reverted` — items recalled or refunded after the marketplace accepted.
+- `trade.settled` — fee/earnings ledger postings completed (paired with `trade.completed`).
+- `trade.refunded` — full or partial refund posted to the user wallet.
 
 Deposit lifecycle:
 
@@ -56,15 +57,22 @@ interface WebhookEnvelope {
   type: string;               // event type, e.g. "trade.completed"
   createdAt: string;          // ISO-8601
   data:
-    | { trade: SerializedTrade; item?: SerializedItem; settlement?: { houseFeeCents: number; merchantFeeCents: number } }
-    | { deposit: SerializedDeposit };
+    | {
+        trade: Trade;                   // same shape as GET /merchant/trades/{id}
+        settlement?: { houseFeeCents: number; merchantFeeCents: number };
+      }
+    | { deposit: Deposit };
 }
 ```
 
-Trade events carry a serialised trade plus, where relevant, a single
-inventory item and the settlement fee breakdown. Deposit events carry a
-serialised deposit (gateway or self-hosted crypto fields, depending on
-method).
+Trade events carry the same `Trade` object you'd get from the trade
+detail endpoint — `id`, `status`, `currency`, `totalPrice`, full
+`items` array, etc. The `items` array reflects the trade's state at
+event-delivery time, including each item's price, marketplace,
+delivery mode, status, and display metadata as it becomes available.
+Settlement events (`trade.settled`, `trade.completed`) additionally
+include the fee breakdown. Deposit events carry a serialised deposit
+(gateway or self-hosted crypto fields, depending on method).
 
 ## Delivery headers
 
