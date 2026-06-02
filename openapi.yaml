@@ -2889,7 +2889,7 @@ paths:
       tags: [Market]
       summary: Bulk per-item price feed
       description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
+        **Auth context:** merchant only. `On-Behalf-Of` rejected.
 
         Page-paginated catalog feed of per-item floors: `instant` (C5 auto-deliver)
         and `standard` (blended C5 + Eco min, the same value `/market/search` returns).
@@ -2897,7 +2897,6 @@ paths:
         matching live listing. Pass `limit=-1` to return the whole catalog in one
         response (no pagination).
       parameters:
-        - { $ref: '#/components/parameters/OnBehalfOf' }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
         - name: limit
           in: query
