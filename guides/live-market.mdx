@@ -1,0 +1,177 @@
+---
+title: "Live market"
+description: "A REST snapshot plus a WebSocket delta stream of the cheapest current listings, repriced for the viewer."
+---
+
+The live market is the set of cheapest current listings across connected
+marketplaces, kept warm and repriced for the viewer. It has two surfaces:
+
+- `GET /market` — a snapshot of the feed, cheapest first.
+- `GET /market/live` — a WebSocket that pushes price deltas in real time.
+
+Use them together: load a snapshot, open the socket, then apply each delta
+on top of the snapshot. Prices on both surfaces already include the
+viewer's fee, so you render them as-is.
+
+## Snapshot
+
+`GET /market` returns the curated feed sorted cheapest first.
+
+```ts
+const { items, total } = await api<{ items: MarketListing[]; total: number }>(
+  "/market?limit=100",
+  { method: "GET" },
+  "user_42",
+);
+```
+
+<ParamField query="page" type="integer" default="1">
+  1-based page number.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Listings per page, 1–500, or `-1` to return the whole feed in one response.
+</ParamField>
+
+Each entry's `price` is a decimal number with the viewer's fee already
+applied, and `id` is the buyable listing id you pass to the trade
+endpoints. See [Data models](/reference/data-models) for the full
+`MarketListing` shape.
+
+## Live stream
+
+```http
+wss://api.skinshark.gg/market/live?scope=watchlist
+```
+
+The socket pushes a delta whenever a listing in scope appears, reprices,
+or is removed. It carries no snapshot of its own — pair it with
+`GET /market` to establish initial state.
+
+### Scopes
+
+<ParamField query="scope" type="string" default="all">
+  `all` or `watchlist`.
+</ParamField>
+
+| Scope | Contents | Payload |
+|---|---|---|
+| `watchlist` | The curated feed `GET /market` returns | Full listing (icon, rarity, reference fields) |
+| `all` | Every listing event across the market (firehose) | Lighter — `type` and `iconUrl` are omitted; high volume |
+
+Pick `watchlist` to track the same set `GET /market` serves. Pick `all`
+only if you want the raw firehose and can absorb the volume.
+
+## Authentication
+
+The live socket uses the same JWT ticket as the [WebSocket](/guides/websocket)
+event stream — the ticket carries a `market` scope alongside `deposit`
+and `trade`, so one ticket works for both sockets.
+
+<Steps>
+  <Step title="Mint a ticket">
+    Call `POST /auth/ws-token` with `On-Behalf-Of` set to the sub-user
+    you're acting as.
+
+    ```ts
+    const { token } = await api<{ token: string; expiresIn: string }>(
+      "/auth/ws-token",
+      { method: "POST" },
+      "user_42",
+    );
+    ```
+  </Step>
+  <Step title="Open the socket">
+    Pass the token as a `bearer.<jwt>` subprotocol (preferred — query
+    strings leak into logs) or as `?token=`:
+
+    ```ts
+    const ws = new WebSocket(
+      "wss://api.skinshark.gg/market/live?scope=watchlist",
+      [`bearer.${token}`],
+    );
+    ```
+  </Step>
+  <Step title="Wait for the ready frame">
+    On a successful upgrade the server sends:
+
+    ```json
+    { "event": "market.ready", "data": { "scope": "watchlist" }, "ts": 1714678920000 }
+    ```
+  </Step>
+</Steps>
+
+## Protocol
+
+- **Read-only.** Sending any frame closes the socket with `4002 Read-only`.
+- **Heartbeats.** The server sends WS pings; reply with pongs (most
+  clients do this automatically).
+- **Frame shape.** Every push is `{ event, data, ts }`, where `ts` is Unix
+  epoch milliseconds.
+
+## Events
+
+```ts
+type LiveEvent =
+  | { event: "market.ready"; data: { scope: "all" | "watchlist" }; ts: number }
+  | { event: "market.new"; data: MarketListing; ts: number }
+  | { event: "market.update"; data: MarketListing; ts: number }
+  | { event: "market.remove"; data: { listingId: string; itemId?: string }; ts: number };
+```
+
+Treat `market.new` and `market.update` identically — upsert the listing
+keyed by `data.id`. On `market.remove`, drop the listing by
+`data.listingId`.
+
+```ts
+const listings = new Map<string, MarketListing>();
+
+ws.addEventListener("message", (raw) => {
+  const evt = JSON.parse(raw.data.toString()) as LiveEvent;
+  switch (evt.event) {
+    case "market.new":
+    case "market.update":
+      listings.set(evt.data.id, evt.data);
+      break;
+    case "market.remove":
+      listings.delete(evt.data.listingId);
+      break;
+  }
+});
+```
+
+## Keeping a view in sync
+
+<Steps>
+  <Step title="Open the socket and buffer">
+    Open `scope=watchlist` and buffer deltas until the snapshot loads, so
+    nothing is lost in the gap.
+  </Step>
+  <Step title="Load the snapshot">
+    Page through `GET /market` into your map keyed by `id`.
+  </Step>
+  <Step title="Apply buffered and live deltas">
+    Replay the buffered deltas, then keep applying new ones. An update for
+    a listing you don't have is just an insert; a remove for one you don't
+    have is a no-op.
+  </Step>
+</Steps>
+
+<Info>
+  Prices are snapshotted at connect time using the acting sub-user's fee
+  tier. A mid-session fee change takes effect on the next reconnect.
+</Info>
+
+## Close codes
+
+| Code | Reason | Cause |
+|---|---|---|
+| 4001 | Missing token | No ticket in the subprotocol or `?token=` |
+| 4001 | Invalid token | Bad signature, expired, or wrong purpose |
+| 4002 | Read-only | Client sent a frame after upgrade |
+| 4003 | Missing market scope | Ticket lacks the `market` scope |
+| 4008 | Too many connections | Over the per-user socket limit |
+
+A sub-user may hold up to 5 concurrent live sockets. For the reconnect
+pattern (mint a fresh ticket on `4001`, back off on network blips), see
+the [WebSocket](/guides/websocket#reconnection) guide.
