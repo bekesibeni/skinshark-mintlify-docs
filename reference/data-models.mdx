@@ -375,7 +375,9 @@ interface SearchResultItem {
   category?: ItemCategory;
   collection?: string;
   floatRange?: [number, number];
-  price?: number;
+  // Both fee-applied. standard = overall lowest (manual); instant = auto-deliver
+  // floor (C5 today), null when none. Omitted when no market price.
+  price?: { standard: number; instant: number | null };
   listingsCount?: number;
   steamPrice?: number;
 }

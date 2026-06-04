@@ -1011,7 +1011,13 @@ components:
           minItems: 2
           maxItems: 2
           items: { type: number }
-        price: { type: number }
+        price:
+          type: object
+          description: Standard = overall lowest (manual). Instant = auto-deliver floor (C5 today), null when none. Both fee-applied.
+          required: [standard, instant]
+          properties:
+            standard: { type: number }
+            instant: { type: [number, "null"] }
         listingsCount: { type: number }
         steamPrice: { type: number }
 
@@ -1594,6 +1600,13 @@ components:
           schema: { $ref: '#/components/schemas/Envelope' }
     RateLimited:
       description: 429 — rate limit exceeded.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    ServiceDisabled:
+      description: |
+        503 — `SERVICE_DISABLED`. An admin kill switch has halted this surface
+        (e.g. trading, deposits, or withdrawals). Retry later.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Envelope' }
@@ -3040,6 +3053,7 @@ paths:
 
         Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
         `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
+        Returns `503 SERVICE_DISABLED` when admin has paused trading.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
       requestBody:
@@ -3062,6 +3076,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceDisabled' }
 
   /market/buy/quick:
     post:
@@ -3075,6 +3090,7 @@ paths:
         `maxPrice` for the given `itemId` and creates one Trade. `itemCount` in
         the response is the actual purchased count (may be less than
         `requestedCount` if supply ran out at the cap).
+        Returns `503 SERVICE_DISABLED` when admin has paused trading.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
       requestBody:
@@ -3097,6 +3113,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceDisabled' }
 
   /market/trades:
     get:
