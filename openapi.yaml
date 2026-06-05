@@ -1351,7 +1351,7 @@ components:
 
     TransactionListResponse:
       type: object
-      description: Sub-user transaction list (`/market/trades`). Cursor-paginated.
+      description: Sub-user transaction list (`/market/transactions`). Cursor-paginated.
       required: [items, nextCursor]
       properties:
         items:
@@ -2024,6 +2024,7 @@ paths:
         - name: status
           in: query
           schema: { $ref: '#/components/schemas/TradeStatus' }
+        - { name: hideResolved, in: query, schema: { type: boolean }, description: Excludes failed + reverted (auto-refunded) trades. Ignored when status is set. }
         - { name: subUserId, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
         - { name: itemName, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
         - { name: externalId, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
@@ -2081,6 +2082,7 @@ paths:
         - name: status
           in: query
           schema: { $ref: '#/components/schemas/TradeStatus' }
+        - { name: hideResolved, in: query, schema: { type: boolean }, description: Excludes failed + reverted (auto-refunded) trades. Ignored when status is set. }
         - { name: itemName, in: query, schema: { type: string } }
         - { name: externalId, in: query, schema: { type: string } }
         - { name: offerId, in: query, schema: { type: string } }
@@ -3115,7 +3117,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/ServiceDisabled' }
 
-  /market/trades:
+  /market/transactions:
     get:
       operationId: listMarketTransactions
       tags: [Market]
@@ -3142,7 +3144,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
-  /market/trades/{tradeId}:
+  /market/transactions/{tradeId}:
     get:
       operationId: getMarketTransaction
       tags: [Market]
@@ -3166,7 +3168,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /market/trades/{tradeId}/items/{itemId}/cancel:
+  /market/transactions/{tradeId}/items/{itemId}/cancel:
     post:
       operationId: cancelMarketTransactionItem
       tags: [Market]
