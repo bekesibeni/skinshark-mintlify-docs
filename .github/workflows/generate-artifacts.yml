@@ -1,0 +1,59 @@
+name: Regenerate derived artifacts
+
+# The Postman collection and llms-full.txt are generated from openapi.yaml and
+# the guide pages — they are not hand-edited. This workflow rebuilds them on
+# every change and commits the result back to main, so they never go stale.
+#
+# llms.txt is hand-curated and is intentionally NOT regenerated here.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'openapi.yaml'
+      - 'index.mdx'
+      - 'quickstart.mdx'
+      - 'guides/**'
+      - 'integration/**'
+      - 'reference/**'
+      - 'scripts/gen-llms-full.mjs'
+      - '.github/workflows/generate-artifacts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: generate-artifacts
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate OpenAPI spec
+        run: npx -y @redocly/cli@latest lint openapi.yaml
+
+      - name: Regenerate Postman collection
+        run: npx -y openapi-to-postmanv2@latest -s openapi.yaml -o "Skinshark partner API.postman_collection.json" -p
+
+      - name: Regenerate llms-full.txt
+        run: node scripts/gen-llms-full.mjs
+
+      - name: Commit regenerated artifacts if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Skinshark partner API.postman_collection.json" llms-full.txt
+          if git diff --cached --quiet; then
+            echo "Artifacts already up to date — nothing to commit."
+          else
+            git commit -m "docs: regenerate Postman collection and llms-full.txt [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          fi

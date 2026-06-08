@@ -115,7 +115,7 @@ A minimal, typed wrapper that fails fast on envelope errors:
 ```ts
 const BASE_URL = "https://api.skinshark.gg";
 
-export class SkinSharkError extends Error {
+export class SkinsharkError extends Error {
   constructor(
     public requestId: string,
     public code: number,
@@ -142,7 +142,7 @@ export async function api<T>(
   const body = await res.json();
 
   if (!body.success) {
-    throw new SkinSharkError(
+    throw new SkinsharkError(
       body.requestId,
       body.error.code,
       body.error.key,

@@ -38,7 +38,7 @@ errors at the call site.
 
 ## The retry decision tree
 
-```
+```text
 Got an error.
 ├─ Network timeout / DNS / connection refused
 │  └─ Retry with same Idempotency-Key (if applicable). Bounded backoff.
@@ -99,7 +99,7 @@ async function buyOrReconcile(input: BuyInput): Promise<Trade> {
   } catch (err) {
     // Trade externalId is unique per (subUser, externalId). A duplicate
     // surfaces as a generic CONFLICT — reconcile to find the original.
-    if (err instanceof SkinSharkError && err.key === "CONFLICT") {
+    if (err instanceof SkinsharkError && err.key === "CONFLICT") {
       const existing = await reconcileTrade(input.checkoutId);
       if (existing) return existing;
     }
@@ -151,7 +151,7 @@ const RETRYABLE_KEYS = new Set([
 ]);
 
 function defaultShouldRetry(err: unknown): boolean {
-  if (!(err instanceof SkinSharkError)) return true; // network/parse errors
+  if (!(err instanceof SkinsharkError)) return true; // network/parse errors
   return RETRYABLE_KEYS.has(err.key);
 }
 ```
@@ -219,7 +219,7 @@ so support can trace through our side. A useful client-side log line:
 
 ```ts
 catch (err) {
-  if (err instanceof SkinSharkError) {
+  if (err instanceof SkinsharkError) {
     console.error(
       {
         op: "fund",

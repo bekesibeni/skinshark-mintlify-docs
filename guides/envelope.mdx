@@ -82,7 +82,7 @@ async function fund(subUserId: string, amount: string) {
       body: JSON.stringify({ amount }),
     });
   } catch (err) {
-    if (err instanceof SkinSharkError) {
+    if (err instanceof SkinsharkError) {
       switch (err.key) {
         case "INSUFFICIENT_BALANCE":
           return notifyOps("merchant balance below threshold");
@@ -99,11 +99,11 @@ async function fund(subUserId: string, amount: string) {
 
 ## A reusable client
 
-Define `SkinSharkError` once and unwrap there. The rest of your code never
+Define `SkinsharkError` once and unwrap there. The rest of your code never
 touches the envelope.
 
 ```ts
-export class SkinSharkError extends Error {
+export class SkinsharkError extends Error {
   constructor(
     public requestId: string,
     public code: number,
@@ -111,7 +111,7 @@ export class SkinSharkError extends Error {
     message: string,
   ) {
     super(message);
-    this.name = "SkinSharkError";
+    this.name = "SkinsharkError";
   }
 }
 
@@ -129,7 +129,7 @@ export async function api<T>(
   const body = await res.json();
 
   if (!body.success) {
-    throw new SkinSharkError(body.requestId, body.error.code, body.error.key, body.error.message);
+    throw new SkinsharkError(body.requestId, body.error.code, body.error.key, body.error.message);
   }
   return body.data as T;
 }

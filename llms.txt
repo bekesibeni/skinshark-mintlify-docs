@@ -1,0 +1,55 @@
+# SkinShark Merchant API
+
+> Server-to-server API for managing sub-users, wallets, deposits, and trades on SkinShark. Authenticate with an API key, act on behalf of sub-users with the `On-Behalf-Of` header, and read every response from a standard envelope.
+
+Base URL: `https://api.skinshark.gg` (staging: `https://api-staging.skinshark.gg`). Every request authenticates with the `api-key` header. A merchant acts as one of its sub-users by setting `On-Behalf-Of` to that sub-user's id. Responses are wrapped as `{ requestId, success, data }` on success or `{ requestId, success, error }` on failure, where `error` carries a numeric `code`, a string `key`, and a `message`. Money is sent and returned as decimal numbers; amounts are computed in integer cents server-side.
+
+## Get started
+
+- [Introduction](https://skinshark.gg/docs): What the API covers and how the pieces fit together.
+- [Quickstart](https://skinshark.gg/docs/quickstart): Create a sub-user, fund it, search the catalog, and buy in a handful of calls.
+- [TypeScript SDK](https://skinshark.gg/docs/guides/sdk): The `@skinshark/sdk` client and its typed surface.
+
+## Core concepts
+
+- [Authentication](https://skinshark.gg/docs/guides/authentication): API-key auth and short-lived WebSocket tickets.
+- [On-Behalf-Of](https://skinshark.gg/docs/guides/on-behalf-of): Acting as a sub-user from a merchant key, and which routes accept the header.
+- [Response envelope](https://skinshark.gg/docs/guides/envelope): The `{ requestId, success, data | error }` wrapper on every response.
+- [Money](https://skinshark.gg/docs/guides/money): Decimal amounts over the wire, cents internally, no floating-point math.
+- [Pagination](https://skinshark.gg/docs/guides/pagination): Page/limit and cursor patterns; `limit=-1` returns a full feed in one response.
+- [Idempotency](https://skinshark.gg/docs/guides/idempotency): The `Idempotency-Key` header on writes to prevent double-charges.
+- [Error handling](https://skinshark.gg/docs/guides/error-handling): Numeric error codes and the retry decision tree.
+
+## Real-time
+
+- [Webhooks](https://skinshark.gg/docs/guides/webhooks): Signed event deliveries, signatures, and the retry schedule.
+- [WebSocket](https://skinshark.gg/docs/guides/websocket): The `/ws` event stream, ticket auth, and reconnection.
+- [Live market](https://skinshark.gg/docs/guides/live-market): The `GET /market` snapshot paired with the `/market/live` delta stream.
+
+## Integration guides
+
+- [Core API](https://skinshark.gg/docs/integration/core-api): Minimal buy-flow integration for an existing wallet.
+- [Full platform](https://skinshark.gg/docs/integration/full-platform): Sub-users, wallets, deposits, and payouts end to end.
+- [Partner crypto payout](https://skinshark.gg/docs/integration/partner-crypto-payout): Crypto payout custody, withdrawal quotes, and submission.
+
+## API reference
+
+- [OpenAPI specification](https://skinshark.gg/docs/openapi.yaml): The full machine-readable spec — every endpoint, parameter, schema, and error.
+- Market: Search items, Search suggestions, List item prices, Get item, List item listings, Get listing, Live market snapshot, Buy listings, Quick buy, List/Get transactions, Cancel transaction item.
+- Users: List/Create/Get/Delete sub-users, Suspend, Reactivate, Fund sub-user wallet, and per-sub-user wallet, ledger, and trades.
+- Account: Get merchant profile, fee configuration, account statistics, merchant balance, and merchant ledger.
+- Wallet & deposits: Wallet balance and ledger; Gate Pay, card on-ramp, and crypto deposit quote/create; Cancel/Resume deposit.
+- Partner payout custody: Payout address, balances, withdrawal quote, create withdrawal, and list/get withdrawals.
+- Trade URLs: List/Add/Update/Delete Steam trade URLs.
+- WebSocket: Create WebSocket token, Open WebSocket connection.
+
+## Reference
+
+- [Data models](https://skinshark.gg/docs/reference/data-models): Shared response shapes returned across endpoints.
+- [Error codes](https://skinshark.gg/docs/reference/errors): The full numeric error-code table with HTTP statuses.
+- [Rate limits](https://skinshark.gg/docs/reference/rate-limits): Per-route limits and the aggregate tier budget.
+
+## Optional
+
+- [Postman collection](https://skinshark.gg/docs/Skinshark%20partner%20API.postman_collection.json): Importable request collection generated from the OpenAPI spec.
+- [Swagger UI sandbox](https://bekesibeni.github.io/skinshark-mintlify-docs/): Interactive try-it console for the same spec.

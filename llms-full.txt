@@ -1,0 +1,5027 @@
+# SkinShark Merchant API
+
+> Server-to-server API for managing sub-users, wallets, deposits, and trades on SkinShark. This file inlines the full documentation for LLM ingestion. The curated index is at llms.txt; the machine-readable spec is at openapi.yaml.
+
+# SkinShark API
+Source: https://skinshark.gg/docs
+
+Programmatic access to merchant accounts, sub-users, wallets, deposits, and trades on the SkinShark CS2 marketplace.
+
+
+The SkinShark API is a server-to-server interface that lets your backend manage
+merchant accounts, provision sub-users, fund wallets, list trades, and execute
+purchases on cross-marketplace inventory. It's the same surface the SkinShark
+dashboard runs on.
+
+## What you can do with it
+
+<CardGroup cols={2}>
+  <Card title="Provision sub-users" href="/guides/on-behalf-of">
+    Create end-user accounts under your merchant. Each gets its own wallet,
+    Steam trade URLs, and trade history.
+  </Card>
+  <Card title="Fund wallets" href="/integration/full-platform">
+    Move balance from your merchant account to any sub-user with idempotent
+    transfers, or accept deposits via Gate Pay, on-ramp cards, or self-hosted
+    EVM crypto.
+  </Card>
+  <Card title="Buy items" href="/api-reference/buymarketitems">
+    Buy specific listings or hand the server a target item and let it pick
+    cheapest-fill across marketplaces.
+  </Card>
+  <Card title="React in real time" href="/guides/websocket">
+    Subscribe to deposit and trade events over a per-user WebSocket, or set
+    up signed HTTPS webhooks.
+  </Card>
+</CardGroup>
+
+## Base URL
+
+```http
+https://api.skinshark.gg
+```
+
+## Authentication
+
+Send your merchant API key on every request:
+
+```http
+api-key: sk_live_...
+```
+
+Keys are hashed at rest, optionally bound to source IPs, and revocable from
+the dashboard. To act as a specific sub-user, add an `On-Behalf-Of` header.
+See [Authentication](/guides/authentication) and [Acting on behalf of a sub-user](/guides/on-behalf-of).
+
+## Response envelope
+
+Every JSON response is wrapped:
+
+```json
+{
+  "requestId": "01900b3f-1ad0-7ab1-9d8a-7b2f54e1d14c",
+  "success": true,
+  "data": { }
+}
+```
+
+Error responses replace `data` with `error`:
+
+```json
+{
+  "requestId": "01900b3f-...",
+  "success": false,
+  "error": {
+    "code": 1500,
+    "key": "INSUFFICIENT_BALANCE",
+    "message": "Insufficient balance"
+  }
+}
+```
+
+The schemas in the [API reference](/api-reference) describe the inner `data`
+shape only; the envelope is implicit. See [Response envelope](/guides/envelope)
+for handling patterns.
+
+## TypeScript-first
+
+Every endpoint in this site is typed in TypeScript via the OpenAPI spec.
+[Generate types](/guides/sdk) with `openapi-typescript` and pair them
+with a small `fetch` wrapper — full IntelliSense, zero runtime
+dependencies, drift-free with the spec.
+
+```ts
+import type { paths } from "./skinshark-api";
+
+type CreateSubUserBody =
+  paths["/merchant/users"]["post"]["requestBody"]["content"]["application/json"];
+
+type CreateSubUserResponse =
+  paths["/merchant/users"]["post"]["responses"]["201"]["content"]["application/json"]["data"];
+```
+
+## Where to start
+
+<Steps>
+  <Step title="Make your first authenticated call">
+    [Quickstart](/quickstart) — search items, fetch live listings, place a buy
+    order in under 5 minutes.
+  </Step>
+  <Step title="Pick an integration mode">
+    [Core API](/integration/core-api) for one shared merchant account, or
+    [Full Platform](/integration/full-platform) for one merchant with isolated
+    sub-users.
+  </Step>
+  <Step title="Wire real-time events">
+    [WebSocket](/guides/websocket) for low-latency in-app updates,
+    [Webhooks](/guides/webhooks) for durable server-side delivery.
+  </Step>
+</Steps>
+
+
+# Quickstart
+Source: https://skinshark.gg/docs/quickstart
+
+Make your first authenticated call, create a sub-user, fund it, and place a buy order — all in TypeScript.
+
+
+This walkthrough takes about 5 minutes. By the end you'll have a typed client
+hitting the API, a sub-user with funds, and a confirmed trade.
+
+## Prerequisites
+
+- A SkinShark merchant API key (`sk_live_...`). Generate one in the dashboard.
+- Node 20+ (or any TypeScript runtime that supports `fetch` natively).
+- Optional: `openapi-typescript` for fully typed responses.
+
+## 1. Set up the client
+
+<CodeGroup>
+
+```ts client.ts
+const BASE_URL = "https://api.skinshark.gg";
+const API_KEY = process.env.SKINSHARK_API_KEY!;
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "api-key": API_KEY,
+      "content-type": "application/json",
+      ...init.headers,
+    },
+  });
+
+  const body = (await res.json()) as
+    | { success: true; requestId: string; data: T }
+    | { success: false; requestId: string; error: { code: number; key: string; message: string } };
+
+  if (!body.success) {
+    throw new Error(`[${body.requestId}] ${body.error.key}: ${body.error.message}`);
+  }
+  return body.data;
+}
+```
+
+```bash curl
+export SKINSHARK_API_KEY="sk_live_..."
+```
+
+</CodeGroup>
+
+<Tip>
+For full type safety, generate types from the OpenAPI spec with
+[`openapi-typescript`](https://github.com/openapi-ts/openapi-typescript) and
+parameterise `api<T>` against the `paths` object.
+</Tip>
+
+## 2. Confirm credentials
+
+`GET /merchant` returns your merchant profile, current fees, and wallet
+snapshot. If this works, your key + IP allowlist + role are all good.
+
+<CodeGroup>
+
+```ts TypeScript
+const profile = await api<{
+  id: string;
+  email: string;
+  merchantFeeBps: number;
+  wallets: { spot: { currency: string; balance: number } | null };
+}>("/merchant");
+
+console.log(profile.email, "-", profile.wallets.spot?.balance, "USD");
+```
+
+```bash curl
+curl https://api.skinshark.gg/merchant \
+  -H "api-key: $SKINSHARK_API_KEY"
+```
+
+</CodeGroup>
+
+## 3. Create a sub-user
+
+A sub-user is an isolated account under your merchant: own wallet, own Steam
+trade URLs, own trade history. Pass an `externalId` you control so you can
+reference this sub-user with your own ID later.
+
+<Note>
+`POST /merchant/users` is **API-key auth only** — it rejects dashboard
+sessions. This is intentional: provisioning happens server-to-server.
+</Note>
+
+<CodeGroup>
+
+```ts TypeScript
+const sub = await api<{
+  id: string;
+  externalId: string | null;
+  currency: "USD" | "EUR";
+}>("/merchant/users", {
+  method: "POST",
+  body: JSON.stringify({
+    email: "alice@example.com",
+    externalId: "user_42",
+  }),
+});
+
+console.log("Sub-user", sub.id, "external", sub.externalId);
+```
+
+```bash curl
+curl https://api.skinshark.gg/merchant/users \
+  -H "api-key: $SKINSHARK_API_KEY" \
+  -H "content-type: application/json" \
+  -d '{"email": "alice@example.com", "externalId": "user_42"}'
+```
+
+</CodeGroup>
+
+## 4. Fund the sub-user
+
+Move balance from your merchant spot wallet to the sub-user. Supply a unique
+`Idempotency-Key` so retrying after a network blip never double-funds.
+
+<CodeGroup>
+
+```ts TypeScript
+import { randomUUID } from "node:crypto";
+
+const fund = await api<{ transactionId: string; idempotent: boolean }>(
+  `/merchant/users/${encodeURIComponent("user_42")}/fund`,
+  {
+    method: "POST",
+    headers: { "idempotency-key": randomUUID() },
+    body: JSON.stringify({ amount: "25.00" }),
+  },
+);
+
+console.log("Funded", fund.transactionId, "(replay:", fund.idempotent, ")");
+```
+
+```bash curl
+curl https://api.skinshark.gg/merchant/users/user_42/fund \
+  -H "api-key: $SKINSHARK_API_KEY" \
+  -H "content-type: application/json" \
+  -H "idempotency-key: $(uuidgen)" \
+  -d '{"amount": "25.00"}'
+```
+
+</CodeGroup>
+
+## 5. Find an item to buy
+
+Acting **on behalf of** the sub-user, search the catalog and grab a live
+listing. The `On-Behalf-Of` header tells the API to scope this call to that
+sub-user — the call runs against their wallet, their Steam trade URL.
+
+<CodeGroup>
+
+```ts TypeScript
+const search = await api<{
+  items: Array<{ id: string; marketHashName: string; price: number }>;
+}>("/market/search?q=ak-47&limit=5", {
+  headers: { "on-behalf-of": "user_42" },
+});
+
+const itemId = search.items[0]!.id;
+
+const listings = await api<{
+  items: Array<{ id: string; price: number; market: string }>;
+}>(`/market/items/${itemId}/listings?limit=10`, {
+  headers: { "on-behalf-of": "user_42" },
+});
+
+const listing = listings.items[0]!;
+console.log("Picked listing", listing.id, "$" + listing.price);
+```
+
+```bash curl
+curl "https://api.skinshark.gg/market/search?q=ak-47&limit=5" \
+  -H "api-key: $SKINSHARK_API_KEY" \
+  -H "on-behalf-of: user_42"
+```
+
+</CodeGroup>
+
+## 6. Buy the listing
+
+Place the order with a `maxPrice` ceiling — if the listing's price drifted
+above this between fetch and buy, that item fails instead of overcharging
+your sub-user.
+
+<CodeGroup>
+
+```ts TypeScript
+const trade = await api<{
+  id: string;
+  status: string;
+  itemCount: number;
+  totalPrice: number;
+}>("/market/buy", {
+  method: "POST",
+  headers: { "on-behalf-of": "user_42" },
+  body: JSON.stringify({
+    items: [
+      {
+        listingId: listing.id,
+        maxPrice: listing.price.toFixed(2),
+      },
+    ],
+    externalId: "checkout_2026_001",
+  }),
+});
+
+console.log("Trade", trade.id, "status", trade.status);
+```
+
+```bash curl
+curl https://api.skinshark.gg/market/buy \
+  -H "api-key: $SKINSHARK_API_KEY" \
+  -H "on-behalf-of: user_42" \
+  -H "content-type: application/json" \
+  -d '{
+    "items": [{ "listingId": "<listing-id>", "maxPrice": "1.50" }],
+    "externalId": "checkout_2026_001"
+  }'
+```
+
+</CodeGroup>
+
+## 7. Watch it execute
+
+The trade transitions through `initiated → pending → active → hold →
+completed`. Two ways to follow it:
+
+<Tabs>
+  <Tab title="Poll merchant trades">
+    ```ts
+    const detail = await api<{ status: string; settledAt?: string }>(
+      `/merchant/trades/${trade.id}`,
+    );
+    ```
+  </Tab>
+  <Tab title="WebSocket (recommended)">
+    ```ts
+    const { token } = await api<{ token: string }>("/auth/ws-token", {
+      method: "POST",
+      headers: { "on-behalf-of": "user_42" },
+    });
+
+    const ws = new WebSocket(`wss://api.skinshark.gg/ws?token=${token}`);
+    ws.addEventListener("message", (e) => {
+      const event = JSON.parse(e.data.toString());
+      if (event.event.startsWith("trade.")) console.log(event);
+    });
+    ```
+  </Tab>
+  <Tab title="Webhook">
+    Configure a callback URL in the dashboard, then handle `trade.*` events
+    with signature verification — see [Webhooks](/guides/webhooks).
+  </Tab>
+</Tabs>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" href="/guides/authentication">
+    Key types, IP allowlists, and the rules for what API-key auth can and
+    can't do.
+  </Card>
+  <Card title="Acting on behalf of" href="/guides/on-behalf-of">
+    The full sub-user model, how `On-Behalf-Of` resolves, and what happens
+    when you forget it.
+  </Card>
+  <Card title="Idempotency" href="/guides/idempotency">
+    Safe retries for funding, buying, and any operation that moves money.
+  </Card>
+  <Card title="Full Platform integration" href="/integration/full-platform">
+    The recommended pattern for SaaS reselling SkinShark to your own users.
+  </Card>
+</CardGroup>
+
+
+# Authentication
+Source: https://skinshark.gg/docs/guides/authentication
+
+API key headers, IP allowlists, and the boundaries between merchant and sub-user context.
+
+
+The SkinShark API authenticates every request with a single header:
+
+```http
+api-key: sk_live_...
+```
+
+That's it. There is no OAuth flow, no JWT bearer header, no signed request
+body. Keys are issued from the merchant dashboard, hashed at rest with
+BLAKE3, and revocable instantly.
+
+<Note>
+The header name is `api-key` — lowercase, hyphenated. `X-API-Key` is rejected.
+</Note>
+
+## What an API key represents
+
+An API key is bound to **one merchant account**. The merchant is the parent;
+their sub-users hang off that parent. A key authorises:
+
+- All `/merchant/*` operations on that merchant
+- Sub-user-context routes (`/user/*`, `/market/*`, `/auth/ws-token`) when
+  combined with an `On-Behalf-Of` header to pick which sub-user to act as
+
+Without `On-Behalf-Of`, sub-user-context routes run against the merchant
+itself: `POST /market/buy` without the header buys for the merchant's own
+spot wallet and uses the merchant's primary Steam trade URL. With the
+header, the same call is scoped to a sub-user.
+
+See [Acting on behalf of a sub-user](/guides/on-behalf-of) for the full
+mechanics.
+
+## What API keys cannot do
+
+Some operations live in the dashboard only and are gated behind
+session-based JWT auth. API keys get a `403 FORBIDDEN` on:
+
+- API key CRUD (creating, rotating, revoking other keys)
+- Webhook URL config, secret rotation, delivery inspection
+- Adjusting merchant fees (read-only over the API)
+- Account settings (password, email change, 2FA, account deletion)
+- Audit log queries and CSV exports
+
+If you need any of these in an automated flow, file a support request.
+We'll either expose it under API-key auth or build a dedicated provisioning
+endpoint.
+
+## IP allowlists
+
+When you create or rotate a key in the dashboard, you can pin it to one or
+more source IPs. Requests from any other IP fail with:
+
+```json
+{
+  "code": 1305,
+  "key": "API_KEY_IP_DENIED",
+  "message": "Request IP not in allowlist"
+}
+```
+
+<Tip>
+For staging and CI, either pin the key to a NAT egress IP or leave the
+allowlist empty during development. Never commit a non-allowlisted key.
+</Tip>
+
+## Storing and rotating keys
+
+- Treat the raw key like a password. The server only stores a hash; once
+  you lose the raw value, you must rotate.
+- Rotate by creating a new key in the dashboard and revoking the old one.
+  Keep both active for the deploy window so callers can roll over.
+- Set per-environment keys (production vs staging vs CI) with separate IP
+  allowlists. Don't reuse keys across environments.
+
+## TypeScript clients
+
+The fastest path is the official `@skinshark/sdk` package, which handles
+the headers, envelope unwrapping, retries, and typed errors for you. Keep
+reading if you'd rather build your own wrapper.
+
+### With `@skinshark/sdk`
+
+```bash
+npm install @skinshark/sdk
+```
+
+```ts
+import { Skinshark } from "@skinshark/sdk";
+
+const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+
+// Merchant context
+const profile = await sdk.account.get();
+
+// Sub-user context — bind once
+const user = await sdk.as("user_42");
+const userProfile = await user.profile.get();
+
+// Or per-call
+await sdk.market.buy(items, "order-1", { onBehalfOf: "user_42" });
+```
+
+The constructor also accepts `baseUrl` (e.g. `https://api-staging.skinshark.gg`),
+`timeoutMs`, `retries`, `userAgent`, and a `debug` hook. See
+[SDK & TypeScript types](/guides/sdk) for the full surface.
+
+### With raw fetch
+
+A minimal, typed wrapper that fails fast on envelope errors:
+
+```ts
+const BASE_URL = "https://api.skinshark.gg";
+
+export class SkinsharkError extends Error {
+  constructor(
+    public requestId: string,
+    public code: number,
+    public key: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  onBehalfOf?: string,
+): Promise<T> {
+  const headers: HeadersInit = {
+    "api-key": process.env.SKINSHARK_API_KEY!,
+    "content-type": "application/json",
+    ...init.headers,
+  };
+  if (onBehalfOf) (headers as Record<string, string>)["on-behalf-of"] = onBehalfOf;
+
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  const body = await res.json();
+
+  if (!body.success) {
+    throw new SkinsharkError(
+      body.requestId,
+      body.error.code,
+      body.error.key,
+      body.error.message,
+    );
+  }
+  return body.data as T;
+}
+```
+
+Use it everywhere:
+
+```ts
+// Merchant context
+const profile = await api<{ id: string }>("/merchant");
+
+// Sub-user context (note third arg)
+const userProfile = await api<{ id: string }>("/user", {}, "user_42");
+```
+
+## Common error keys
+
+| Code | HTTP | Key | Meaning |
+|---|---|---|---|
+| 1104 | 401 | `MISSING_API_KEY` | No `api-key` header sent. |
+| 1105 | 401 | `INVALID_API_KEY` | Key not found. |
+| 1106 | 401 | `API_KEY_REVOKED` | Key was active but has been revoked. |
+| 1305 | 403 | `API_KEY_IP_DENIED` | Source IP not on the allowlist. |
+| 1301 | 403 | `ACCOUNT_SUSPENDED` | The merchant account is suspended. |
+| 1300 | 403 | `FORBIDDEN` | Trying to call a dashboard-only endpoint, or `On-Behalf-Of` set on a `/merchant/*` route. |
+| 1307 | 404 | `USER_NOT_FOUND` | `On-Behalf-Of` references a sub-user not owned by this merchant. |
+
+See [Errors](/reference/errors) for the full table.
+
+
+# Acting on behalf of a sub-user
+Source: https://skinshark.gg/docs/guides/on-behalf-of
+
+The On-Behalf-Of header, the merchant/sub-user model, and how routes resolve based on whether you set it.
+
+
+SkinShark gives every merchant the ability to provision **sub-users** —
+isolated accounts under one merchant key. Each sub-user has its own wallet,
+own Steam trade URLs, own trade history. From your end users' perspective,
+the merchant is invisible; from the SkinShark side, every action is
+attributable to a specific sub-user.
+
+The bridge between your merchant API key and any one sub-user is a single
+header.
+
+## The header
+
+```http
+On-Behalf-Of: <subUserId | externalId>
+```
+
+The value can be:
+
+- The sub-user's UUID (returned by `POST /merchant/users`), or
+- The `externalId` you assigned when creating them.
+
+Both resolve to the same sub-user. UUIDs are stable; external IDs are yours
+to choose. Most teams set `externalId` to their internal user ID
+(`user_42`, `acme_customer_8129`) and never persist the SkinShark UUID.
+
+## Where the header applies
+
+| Route prefix | `On-Behalf-Of` |
+|---|---|
+| `/merchant/*` | **Rejected.** Sub-users don't hold the merchant role, so the call fails with `FORBIDDEN`. |
+| `/user/*` | Optional — sets the calling sub-user. |
+| `/market/*` | Optional — sets the calling sub-user. |
+| `/auth/ws-token`, `/ws` | Optional — scopes the WebSocket token. |
+
+With `@skinshark/sdk`, you can either pass `onBehalfOf` per call or bind a
+sub-user once with `await sdk.as(ref)` and call methods on the returned
+client — it injects the header for every call. See the
+[SDK guide](/guides/sdk) for the full pattern.
+
+Without the header on a sub-user-context route, the call runs **as the
+merchant itself**. That's intentional: it lets the merchant trade for its
+own account when needed.
+
+## Examples
+
+<Tabs>
+  <Tab title="Buy for a sub-user">
+    The buy debits `user_42`'s wallet, uses their primary Steam trade URL,
+    and the resulting trade shows up under their history.
+
+    ```ts
+    await api("/market/buy", {
+      method: "POST",
+      headers: { "on-behalf-of": "user_42" },
+      body: JSON.stringify({ items: [/* … */] }),
+    });
+    ```
+  </Tab>
+  <Tab title="Buy for the merchant">
+    No `On-Behalf-Of` header → the merchant is the buyer. Their spot wallet
+    is debited, their primary trade URL is used.
+
+    ```ts
+    await api("/market/buy", {
+      method: "POST",
+      body: JSON.stringify({ items: [/* … */] }),
+    });
+    ```
+  </Tab>
+  <Tab title="List a sub-user's trades">
+    There are two valid ways to list a sub-user's trades:
+
+    ```ts
+    // (a) Merchant-context endpoint, filter by sub-user
+    await api(`/merchant/users/${userId}/trades?limit=25`);
+
+    // (b) Sub-user-context endpoint, with the header
+    await api(
+      "/market/transactions?limit=25",
+      {},
+      userId,
+    );
+    ```
+
+    Both are scoped to the same trades. Pick (a) for cross-sub-user
+    aggregation in your dashboards; pick (b) when you're already in the
+    sub-user's session/context.
+  </Tab>
+</Tabs>
+
+## Resolving the value
+
+The server resolves both UUID and `externalId` against `parentId = your
+merchant`. A UUID that belongs to a *different* merchant returns
+`USER_NOT_FOUND` — never `FORBIDDEN` — so other merchants' UUIDs can't be
+enumerated through error responses.
+
+```json
+{
+  "requestId": "01900b...",
+  "success": false,
+  "error": {
+    "code": 1307,
+    "key": "USER_NOT_FOUND",
+    "message": "User not found"
+  }
+}
+```
+
+## Mistakes to watch for
+
+<AccordionGroup>
+  <Accordion title="Sending On-Behalf-Of on a /merchant/* route">
+    The `requireMerchant` guard checks the *resolved* role. Sub-users don't
+    have the merchant role, so the call returns `FORBIDDEN` with code 1300.
+    Drop the header for merchant-context routes (or just don't send it on
+    that path).
+  </Accordion>
+  <Accordion title="Forgetting On-Behalf-Of on /market/buy">
+    The buy succeeds — but it buys *for the merchant*. If you wanted to buy
+    for a customer, you'll see the listing in your merchant trade history,
+    not theirs, and the merchant's wallet was debited.
+
+    Defensive pattern: always set `On-Behalf-Of` when handling a customer
+    request, never derive intent from absence:
+    ```ts
+    if (!subUserExternalId) throw new Error("missing customer id");
+    return api(path, init, subUserExternalId);
+    ```
+  </Accordion>
+  <Accordion title="Letting end users supply the externalId">
+    `externalId` is a server-side trust boundary. If your client lets a
+    user pass an arbitrary ID and you forward it as `On-Behalf-Of`, you've
+    just given that user the ability to act as any of your sub-users.
+    Always derive the value from your own session/auth, not request input.
+  </Accordion>
+</AccordionGroup>
+
+## Suspended sub-users
+
+If a sub-user is suspended (via `POST /merchant/users/{id}/suspend`), every
+`On-Behalf-Of` resolution to that user returns:
+
+```json
+{ "code": 1301, "key": "ACCOUNT_SUSPENDED", "message": "Account is suspended" }
+```
+
+Trades, deposits, and balance reads all fail with this. Reactivate with
+`POST /merchant/users/{id}/reactivate`.
+
+
+# Response envelope
+Source: https://skinshark.gg/docs/guides/envelope
+
+Every response is wrapped. Here's the exact shape and how to handle it once in your client.
+
+
+Every JSON response from the API ships in the same envelope. Your client
+should unwrap it once and let the rest of your code work with the inner
+data.
+
+## Shape
+
+<Tabs>
+  <Tab title="Success">
+    ```ts
+    interface SuccessEnvelope<T> {
+      requestId: string;       // UUIDv7
+      success: true;
+      data: T;                 // shape varies per endpoint
+    }
+    ```
+
+    ```json
+    {
+      "requestId": "01900b3f-1ad0-7ab1-9d8a-7b2f54e1d14c",
+      "success": true,
+      "data": {
+        "id": "01h0...",
+        "email": "alice@example.com"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Error">
+    ```ts
+    interface ErrorEnvelope {
+      requestId: string;
+      success: false;
+      error: {
+        code: number;          // numeric error code
+        key: string;           // stable string key (use this for branching)
+        message: string;       // human-readable
+      };
+    }
+    ```
+
+    ```json
+    {
+      "requestId": "01900b3f-...",
+      "success": false,
+      "error": {
+        "code": 1500,
+        "key": "INSUFFICIENT_BALANCE",
+        "message": "Insufficient balance"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+The OpenAPI spec describes the inner `data` shape only — the envelope is
+always there.
+
+## requestId
+
+Always present, on success and error. UUIDv7 format. Log it on every
+request so support requests can be traced end-to-end.
+
+```ts
+console.error({ requestId: body.requestId, key: body.error.key }, "API call failed");
+```
+
+## Branching on errors
+
+Always branch on `error.key`, never on `error.message`. The message is
+human-readable and may change; the key is stable.
+
+```ts
+async function fund(subUserId: string, amount: string) {
+  try {
+    return await api("/merchant/users/" + subUserId + "/fund", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    });
+  } catch (err) {
+    if (err instanceof SkinsharkError) {
+      switch (err.key) {
+        case "INSUFFICIENT_BALANCE":
+          return notifyOps("merchant balance below threshold");
+        case "TRANSFER_CURRENCY_MISMATCH":
+          throw new BadRequest("sub-user wallet currency differs from merchant");
+        case "IDEMPOTENCY_KEY_REQUIRED":
+          throw new BadRequest("missing Idempotency-Key header");
+      }
+    }
+    throw err;
+  }
+}
+```
+
+## A reusable client
+
+Define `SkinsharkError` once and unwrap there. The rest of your code never
+touches the envelope.
+
+```ts
+export class SkinsharkError extends Error {
+  constructor(
+    public requestId: string,
+    public code: number,
+    public key: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SkinsharkError";
+  }
+}
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  onBehalfOf?: string,
+): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("api-key", process.env.SKINSHARK_API_KEY!);
+  if (init.body) headers.set("content-type", "application/json");
+  if (onBehalfOf) headers.set("on-behalf-of", onBehalfOf);
+
+  const res = await fetch("https://api.skinshark.gg" + path, { ...init, headers });
+  const body = await res.json();
+
+  if (!body.success) {
+    throw new SkinsharkError(body.requestId, body.error.code, body.error.key, body.error.message);
+  }
+  return body.data as T;
+}
+```
+
+## HTTP status vs envelope
+
+Both are set on every response:
+
+- `2xx` ↔ `success: true`
+- `4xx` / `5xx` ↔ `success: false`
+
+If you read the body, the envelope is authoritative. If you only have the
+status code (e.g. logs), `4xx` ≠ retry, `5xx` = transient. See
+[Error handling](/guides/error-handling) for retry strategy.
+
+
+# Money format
+Source: https://skinshark.gg/docs/guides/money
+
+Why some fields are integer cents, why some are decimals, and what to send when you're the input side.
+
+
+SkinShark stores every amount as `bigint` cents internally. On the wire two
+shapes appear, depending on whether you're reading or writing.
+
+## Reading
+
+| Field suffix | Type | Example | Meaning |
+|---|---|---|---|
+| `Cents` | `number` | `1500` | Integer cents as a JSON number. Safe through ~$90T (2^53 cents). |
+| no suffix (`balance`, `gmv`, `totalPrice`) | `number` | `15.00` | Decimal in the wallet's currency, two decimal places. |
+
+Both shapes are present on most endpoints. Pick whichever matches your storage:
+
+```ts
+interface MerchantStats {
+  totals: {
+    gmvCents: number;       // 1234500 — exact integer cents
+    gmv: number;            // 12345.00 — decimal number
+    feesEarnedCents: number;
+    feesEarned: number;
+  };
+}
+```
+
+<Tip>
+For accounting and ledger math, work with `*Cents` integers — exact in JS up to
+2^53. For UI display, the decimal field is fine.
+</Tip>
+
+```ts
+const stats = await api<MerchantStats>("/merchant/stats");
+
+const gmvCents = stats.totals.gmvCents;        // exact integer
+const display = stats.totals.gmv.toFixed(2);   // "12345.00" for the UI
+```
+
+## Writing
+
+Endpoints that accept money take **decimal strings**:
+
+```ts
+{
+  "amount": "5.50"   // ✅ string, two decimals max
+}
+```
+
+| Endpoint | Field | Example |
+|---|---|---|
+| `POST /merchant/users/{id}/fund` | `amount` | `"25.00"` |
+| `POST /market/buy` (`items[].maxPrice`) | `maxPrice` | `"1.50"` |
+| `POST /market/buy/quick` | `maxPrice` | `"1.50"` |
+| `POST /user/wallet/deposit/gate/quote` | `amount` | `"100.00"` |
+| `POST /user/wallet/deposit/onramp/quote` | `payAmount` / `receiveAmount` | `100.00` (number, fine for on-ramp) |
+| `POST /user/wallet/deposit/crypto/quote` | `amount` | `100.00` (number, ≤ $10M) |
+
+The decimal-string format (`"25.00"`) avoids floating-point loss on the
+wire. The schema rejects more than two decimal places.
+
+```ts
+// ✅
+fund("user_42", "25.00");
+
+// ✅ — integer is fine
+fund("user_42", "25");
+
+// ❌ — three decimals: 422 VALIDATION_FAILED
+fund("user_42", "25.005");
+
+// ❌ — float: lossy, but the schema accepts strings only
+fund("user_42", String(25.50));  // works, but be careful
+```
+
+## A safe converter
+
+Convert from cents to decimal string without `Number / 100`:
+
+```ts
+function centsToDecimal(cents: number | bigint, decimals = 2): string {
+  const c = BigInt(cents);
+  const negative = c < 0n;
+  const abs = negative ? -c : c;
+  const divisor = 10n ** BigInt(decimals);
+  const whole = abs / divisor;
+  const fraction = (abs % divisor).toString().padStart(decimals, "0");
+  return `${negative ? "-" : ""}${whole}.${fraction}`;
+}
+
+centsToDecimal(2550);      // "25.50"
+centsToDecimal(99999999);  // "999999.99" — exact
+```
+
+The reverse — decimal string to cents — is just `Number(decimal.replace(".", ""))`
+after padding.
+
+## Currency
+
+Every wallet has exactly one currency: `USD` or `EUR`. **Merchant accounts
+are USD-only** — attempting to set them to anything else returns
+`MERCHANT_MUST_BE_USD` (1521). Sub-users default to USD on creation; pass
+`currency: "EUR"` on `POST /merchant/users` to override per sub-user.
+
+Funding a sub-user from the merchant spot wallet requires both wallets to
+share a currency. EUR sub-users must be funded via deposit, not internal
+transfer:
+
+```json
+{
+  "code": 1520,
+  "key": "TRANSFER_CURRENCY_MISMATCH",
+  "message": "Merchant and sub-user currencies do not match"
+}
+```
+
+Cross-currency transfers go through the deposit flow (deposit fiat in the
+sub-user's currency) rather than direct fund transfers.
+
+
+# Pagination
+Source: https://skinshark.gg/docs/guides/pagination
+
+Two styles, used per endpoint based on how the data is queried. Pick the right one and don't mix.
+
+
+The API uses two pagination styles. Each endpoint commits to one — the
+choice reflects the underlying query, not a preference. Don't try to pass
+both.
+
+Every list response uses the field name **`items`** for the array.
+
+## Page-based
+
+Used for stable, count-bounded lists where you want to jump to a page or
+show a total count.
+
+```http
+GET /merchant/users?page=2&limit=25
+```
+
+Response:
+
+```ts
+interface PageResult<T> {
+  items: T[];
+  total: number;     // total matching across all pages
+  page: number;      // echoed
+  limit: number;     // echoed
+  totalPages: number;
+}
+```
+
+Endpoints that use this:
+
+- `GET /merchant/users`
+- `GET /market/search`
+- `GET /market/prices` — also accepts `limit=-1` to return the whole catalog in one response
+- `GET /market/items/{itemId}/listings`
+
+## Cursor-based
+
+Used for trade and ledger lists where rows arrive over time and you want
+to walk backwards from "now" without total counts.
+
+```http
+GET /merchant/trades?cursor=01h0...&limit=25
+```
+
+Response:
+
+```ts
+interface CursorResult<T> {
+  items: T[];
+  nextCursor: string | null;  // null on the last page
+}
+```
+
+Send `nextCursor` from the previous response as `cursor` to fetch the next
+page. Stop when it comes back `null`.
+
+```ts
+let cursor: string | undefined;
+const all: Trade[] = [];
+
+do {
+  const page = await api<{ items: Trade[]; nextCursor: string | null }>(
+    `/merchant/trades?limit=100${cursor ? `&cursor=${cursor}` : ""}`,
+  );
+  all.push(...page.items);
+  cursor = page.nextCursor ?? undefined;
+} while (cursor);
+```
+
+Endpoints that use this:
+
+- `GET /merchant/trades`, `GET /merchant/users/{id}/trades`
+- `GET /merchant/ledger`, `GET /merchant/users/{id}/ledger`
+- `GET /user/wallet/ledger`
+- `GET /market/transactions`
+
+## Why two styles
+
+| Property | Page-based | Cursor-based |
+|---|---|---|
+| Total count | ✅ Returned | ❌ Not available |
+| Stable across new rows | ❌ Drifts | ✅ Stable |
+| Random access (page 17) | ✅ | ❌ |
+| Cost on big tables | O(skip) | O(1) |
+
+Trade lists grow continuously; using a page index would mean a new trade
+arriving between requests pushes everything down by one. The cursor is a
+trade ID — it doesn't drift.
+
+## Limits
+
+All pagination endpoints accept `limit` between 1 and 100. The default is
+25 unless documented otherwise. Send a sane upper bound; don't paginate
+the whole list in one request unless the dataset is small.
+
+```ts
+// Common pattern: walk pages until you have enough
+async function findCompletedTrade(externalId: string): Promise<Trade | null> {
+  let cursor: string | undefined;
+  for (let i = 0; i < 10; i++) {  // bound the search
+    const page = await api<{ items: Trade[]; nextCursor: string | null }>(
+      `/merchant/trades?status=completed&externalId=${externalId}&limit=50` +
+        (cursor ? `&cursor=${cursor}` : ""),
+    );
+    const hit = page.items.find((t) => t.externalId === externalId);
+    if (hit) return hit;
+    if (!page.nextCursor) return null;
+    cursor = page.nextCursor;
+  }
+  throw new Error("trade not found in last 500 rows");
+}
+```
+
+
+# Idempotency
+Source: https://skinshark.gg/docs/guides/idempotency
+
+How to retry money-moving operations safely. The Idempotency-Key header on /fund, externalId on trades and sub-users.
+
+
+Anything that moves money is safe to retry **only** if the server can
+recognise the retry as a duplicate. SkinShark gives you two mechanisms,
+chosen per endpoint:
+
+- **`Idempotency-Key` header** on `/fund` — transient retry safety with a
+  short TTL.
+- **`externalId` body field** on sub-user creation, `/market/buy`, and
+  `/market/buy/quick` — your own permanent correlation id, doubles as the
+  natural retry key.
+
+## Idempotency-Key header (on funding)
+
+`POST /merchant/users/{id}/fund` requires an `Idempotency-Key` header.
+Replays with the same key — for the same merchant — return the original
+transaction with `idempotent: true`.
+
+```http
+POST /merchant/users/user_42/fund
+api-key: sk_live_...
+Idempotency-Key: 01h0bf2c-e9d8-4d3a-9c70-...
+content-type: application/json
+
+{ "amount": "25.00" }
+```
+
+```json
+// First call
+{ "transactionId": "01h0...", "idempotent": false }
+
+// Replay with same key
+{ "transactionId": "01h0...", "idempotent": true }
+```
+
+<Tip>
+Generate the key once per logical operation, not per HTTP attempt. If your
+checkout retries on network errors, all retries should send the same key.
+</Tip>
+
+### With `@skinshark/sdk`
+
+The SDK auto-generates an `Idempotency-Key` (UUIDv4) for every `fund` call
+when you don't pass one. To pin retries to a key derived from your own
+checkout id, pass it explicitly:
+
+```ts
+import { Skinshark } from "@skinshark/sdk";
+
+const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+
+await sdk.users.fund(
+  "user_42",
+  { amount: "25.00" },
+  { idempotencyKey: `checkout:${checkoutId}` },   // your stable key
+);
+```
+
+### With raw fetch
+
+```ts
+async function fundForCheckout(checkoutId: string, subUserId: string, amount: string) {
+  const idempotencyKey = `checkout:${checkoutId}`;
+
+  return api<{ transactionId: string; idempotent: boolean }>(
+    `/merchant/users/${subUserId}/fund`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": idempotencyKey },
+      body: JSON.stringify({ amount }),
+    },
+  );
+}
+```
+
+### Scope
+
+Idempotency keys are scoped per merchant: `merchant:<merchantId>:<key>`.
+Two different merchants can use the same key without colliding, and a
+sub-user's externalId never affects scope.
+
+### Errors
+
+| Code | Key | Meaning |
+|---|---|---|
+| 1511 | `IDEMPOTENCY_KEY_REQUIRED` | Header missing on `/fund`. |
+| 1510 | `IDEMPOTENCY_CONFLICT` | Same key, different body. The server returns the conflict instead of replaying. |
+
+## externalId (on sub-user creation, buys, quick-buys)
+
+`POST /merchant/users`, `POST /market/buy`, and `POST /market/buy/quick`
+accept an `externalId` field. The server treats it as the natural retry
+key.
+
+### Sub-user creation
+
+`createSubUser` replays on **matching** `externalId`:
+
+- Same `externalId`, same email/steamId → returns the existing user with
+  `idempotent: true` (no duplicate created).
+- Same `externalId`, different email/steamId → 409 `EXTERNAL_ID_TAKEN`.
+
+```ts
+const created = await sdk.users.create({
+  email: "alice@example.com",
+  externalId: "customer_42",
+});
+
+if (created.idempotent) {
+  // Already had a sub-user with externalId customer_42, returned the existing one.
+}
+```
+
+### Buys
+
+`market.buy` and `market.quickBuy` replay on matching `externalId` —
+calling either with the same `externalId` for the same sub-user returns
+the **existing** Trade rather than creating a new one. This makes the
+buy + retry pattern idempotent without any extra header.
+
+```ts
+import { Skinshark } from "@skinshark/sdk";
+
+const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+const user = await sdk.as("customer_42");
+
+// Same externalId in both calls = same Trade returned
+const trade1 = await user.market.buy(items, "order-7421");
+const trade2 = await user.market.buy(items, "order-7421");
+// trade1.id === trade2.id
+```
+
+Or with raw fetch:
+
+```ts
+async function buy(input: {
+  externalId: string;
+  subUserId: string;
+  items: BuyItem[];
+}): Promise<Trade> {
+  return await api<Trade>("/market/buy", {
+    method: "POST",
+    headers: { "on-behalf-of": input.subUserId },
+    body: JSON.stringify({ items: input.items, externalId: input.externalId }),
+  });
+}
+```
+
+Use `externalId` as your join key everywhere — when you reconcile
+SkinShark trades back into your own order table, you look them up by your
+own checkout ID, not the SkinShark UUID.
+
+### Picking values
+
+Pick `externalId` values that uniquely identify a *logical* operation —
+don't recycle them across different intents. A retried checkout reuses
+the same ID; a fresh checkout gets a fresh ID.
+
+## Operations without idempotency
+
+Some endpoints don't have idempotency support — duplicates from network
+failures need different handling:
+
+- **Catalog reads** (search, listings, item detail) — GETs, free to retry.
+- **Deposit `quote` endpoints** — quotes are short-lived (TTL embedded in
+  `expiresIn`); if you retry within the TTL you'll get a different quote.
+  Don't retry on network failure; create a fresh quote.
+- **Deposit `create` / `session` endpoints** — retrying after a network
+  failure can produce two pending deposits. Pattern: walk recent deposits
+  for the sub-user and **resume** the existing one rather than creating
+  fresh:
+
+```ts
+// Resume an in-progress deposit instead of creating a new one
+await sdk.deposits.resume(fundingId);
+// Returns the current whitelabelUrl / on-chain address.
+```
+
+If your quote expires mid-flow:
+
+```ts
+try {
+  return await sdk.deposits.gate.create({ quoteToken, chain }, { onBehalfOf: subUserId });
+} catch (err) {
+  if (isError(err, "INVALID_QUOTE")) {
+    const quote = await sdk.deposits.gate.quote(requote, { onBehalfOf: subUserId });
+    return sdk.deposits.gate.create({ quoteToken: quote.quoteToken, chain }, { onBehalfOf: subUserId });
+  }
+  throw err;
+}
+```
+
+## When to retry vs reconcile
+
+| Failure mode | Action |
+|---|---|
+| Network timeout | Retry with the same idempotency key (or `externalId`). |
+| `5xx` from SkinShark | Retry with the same idempotency key (or `externalId`). |
+| `4xx` other than `429` | Don't retry. Fix the input. |
+| `429 Rate limited` | Honour `Retry-After`, then retry. |
+| Truly unknown state (e.g. you crashed mid-call) | Reconcile: query `/merchant/trades?externalId=<your-id>` to see if the trade made it. |
+
+The `@skinshark/sdk` HTTP layer auto-retries 408/429/5xx with exponential
+backoff and `Retry-After`-honouring delays. POST/PATCH retries are gated
+on the presence of `idempotencyKey` to prevent double-charges.
+
+
+# Error handling
+Source: https://skinshark.gg/docs/guides/error-handling
+
+Retry policy, when to reconcile vs replay, and patterns for safely recovering from any failure mode.
+
+
+The API returns errors in the [response envelope](/guides/envelope), so
+your client throws a typed `SkinsharkError` for any non-2xx response.
+This page covers what to *do* with that error.
+
+## Using `@skinshark/sdk`
+
+If you're using the SDK, you get the typed error class plus narrowing
+guards out of the box:
+
+```ts
+import { Skinshark, SkinsharkError, isError, isAuthError, isRateLimited } from "@skinshark/sdk";
+
+try {
+  await sdk.market.buy(items, "order-1", { onBehalfOf: "u-1" });
+} catch (e) {
+  if (!(e instanceof SkinsharkError)) throw e;
+
+  if (isError(e, "INSUFFICIENT_BALANCE")) /* refill */;
+  if (isError(e, "PRICE_MISMATCH"))       /* refresh listing */;
+  if (isAuthError(e))                     /* rotate key */;
+  if (isRateLimited(e))                   await sleep(e.retryAfterMs ?? 1000);
+
+  console.error({ key: e.key, code: e.code, requestId: e.requestId });
+}
+```
+
+The SDK also auto-retries 408/429/5xx with exponential backoff and
+`Retry-After` honoring. POST/PATCH retries are gated on the presence of
+`idempotencyKey` to prevent double-charges. The decision tree below
+applies whether you're using the SDK or raw fetch — the SDK handles the
+network/timeout/5xx layer for you, and you handle the business-rule
+errors at the call site.
+
+## The retry decision tree
+
+```text
+Got an error.
+├─ Network timeout / DNS / connection refused
+│  └─ Retry with same Idempotency-Key (if applicable). Bounded backoff.
+│
+├─ 500 INTERNAL
+│  └─ Retry with same Idempotency-Key. Bounded backoff (3-5 attempts).
+│
+├─ 503 MARKET_UNAVAILABLE / FX_RATE_UNAVAILABLE / MAINTENANCE_MODE
+│  └─ Retry once after 30s. If still failing, surface to user.
+│
+├─ 504 MARKET_TIMEOUT / PURCHASE_RETRY_TIMEOUT
+│  └─ Don't blind-retry. Reconcile by externalId — the operation may have completed.
+│
+├─ 429 RATE_LIMITED
+│  └─ Honor Retry-After header, then retry.
+│
+├─ 422 VALIDATION_FAILED / INVALID_AMOUNT / INSUFFICIENT_BALANCE / PRICE_BELOW_MINIMUM
+│  └─ Don't retry. Fix the input.
+│
+├─ 401 / 403 (auth / forbidden)
+│  └─ Don't retry. Investigate keys, IP allowlist, role, suspended account.
+│
+├─ 404 USER_NOT_FOUND / ORDER_NOT_FOUND / LISTING_NOT_FOUND
+│  └─ Don't retry. The thing doesn't exist.
+│
+├─ 409 PRICE_MISMATCH / IDEMPOTENCY_CONFLICT / EMAIL_TAKEN / TRADE_NOT_CANCELLABLE
+│  └─ Reconcile, don't retry. Re-quote, look up by externalId, etc.
+│
+└─ Truly unknown state (your process crashed mid-call)
+   └─ Reconcile by externalId before retrying anything.
+```
+
+## Reconcile vs replay
+
+**Replay** = send the same request again with the same `Idempotency-Key`.
+The server deduplicates and returns the original result. Only `POST
+/merchant/users/{id}/fund` supports this today.
+
+**Reconcile** = query the API to discover whether the previous attempt
+succeeded, regardless of whether you ever saw the response.
+
+When in doubt, reconcile. Replay is only safe on idempotent endpoints.
+
+```ts
+async function reconcileTrade(checkoutId: string): Promise<Trade | null> {
+  // Look up by your own externalId
+  const result = await api<{
+    items: Trade[];
+    nextCursor: string | null;
+  }>(`/merchant/trades?externalId=${encodeURIComponent(checkoutId)}&limit=1`);
+
+  return result.items[0] ?? null;
+}
+
+async function buyOrReconcile(input: BuyInput): Promise<Trade> {
+  try {
+    return await api("/market/buy", { /* … */ });
+  } catch (err) {
+    // Trade externalId is unique per (subUser, externalId). A duplicate
+    // surfaces as a generic CONFLICT — reconcile to find the original.
+    if (err instanceof SkinsharkError && err.key === "CONFLICT") {
+      const existing = await reconcileTrade(input.checkoutId);
+      if (existing) return existing;
+    }
+    throw err;
+  }
+}
+```
+
+## Bounded retry helper
+
+A reusable retry-with-backoff for safe operations:
+
+```ts
+interface RetryOptions {
+  attempts?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  shouldRetry?: (err: unknown) => boolean;
+}
+
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: RetryOptions = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 3;
+  const base = opts.baseDelayMs ?? 500;
+  const max = opts.maxDelayMs ?? 8_000;
+  const shouldRetry = opts.shouldRetry ?? defaultShouldRetry;
+
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const last = i === attempts - 1;
+      if (last || !shouldRetry(err)) throw err;
+      const delay = Math.min(max, base * 2 ** i) + Math.random() * 200;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error("unreachable");
+}
+
+const RETRYABLE_KEYS = new Set([
+  "INTERNAL",            // 500
+  "MARKET_UNAVAILABLE",  // 503
+  "FX_RATE_UNAVAILABLE", // 503
+  "MAINTENANCE_MODE",    // 503
+  "RATE_LIMITED",        // 429 — pair with Retry-After
+]);
+
+function defaultShouldRetry(err: unknown): boolean {
+  if (!(err instanceof SkinsharkError)) return true; // network/parse errors
+  return RETRYABLE_KEYS.has(err.key);
+}
+```
+
+```ts
+// Safe: idempotency key bound to checkoutId, retry on transient server errors
+await withRetry(() =>
+  api(`/merchant/users/${subUserId}/fund`, {
+    method: "POST",
+    headers: { "idempotency-key": `checkout:${checkoutId}` },
+    body: JSON.stringify({ amount }),
+  }),
+);
+```
+
+## Common error keys, by category
+
+### Auth (don't retry — fix the credential)
+
+| Key | Cause | Fix |
+|---|---|---|
+| `MISSING_API_KEY` | No `api-key` header. | Add it. |
+| `INVALID_API_KEY` | Key not found / wrong env. | Check value and env. |
+| `API_KEY_REVOKED` | Key was revoked in dashboard. | Rotate. |
+| `API_KEY_IP_DENIED` | Source IP not on allowlist. | Update allowlist or pin to NAT IP. |
+| `FORBIDDEN` | Calling a JWT-only route, or `On-Behalf-Of` on `/merchant/*`. | Drop the header / use the right route. |
+| `USER_NOT_FOUND` | `On-Behalf-Of` ID not owned by your merchant. | Check the value. |
+| `ACCOUNT_SUSPENDED` | Merchant or sub-user suspended. | Reactivate before retrying. |
+
+### Money (don't retry — surface to user)
+
+| Key | Cause | Fix |
+|---|---|---|
+| `INSUFFICIENT_BALANCE` | Wallet balance < required. | Top up or reject the operation. |
+| `TRANSFER_CURRENCY_MISMATCH` | Merchant ≠ sub-user wallet currency. | Use deposit flow. |
+| `INVALID_AMOUNT` | Amount ≤ 0 or wrong format. | Validate input. |
+| `MERCHANT_MUST_BE_USD` | Tried to set merchant currency to non-USD. | Merchants are USD-only. |
+
+### Trade (mostly user-facing)
+
+| Key | Cause |
+|---|---|
+| `LISTING_NOT_FOUND` | Listing already sold or removed. |
+| `PRICE_MISMATCH` | Listing price moved above `maxPrice`. Re-quote. |
+| `PRICE_BELOW_MINIMUM` | Quick-buy `maxPrice` below current minimum. |
+| `TRADEURL_REQUIRED` | Sub-user has no primary Steam trade URL set. |
+| `TRADEURL_INVALID_TOKEN` | Trade URL invalid, expired, or inventory private. |
+| `TRADEURL_ESCROW` | Counterparty's account has trade hold enabled. |
+| `TRADE_NOT_CANCELLABLE` | Trade not in a cancellable state. |
+| `TRADE_CANCEL_TOO_SOON` | Trade must be ≥ 30 minutes old to cancel. |
+
+### Idempotency
+
+| Key | Cause |
+|---|---|
+| `IDEMPOTENCY_KEY_REQUIRED` | Header missing on `/fund`. |
+| `IDEMPOTENCY_CONFLICT` | Same key, different body — server returns the original transaction. |
+
+The full table is in [Errors](/reference/errors).
+
+## What to log
+
+Every error has a `requestId`. Log it on every API call (success or fail)
+so support can trace through our side. A useful client-side log line:
+
+```ts
+catch (err) {
+  if (err instanceof SkinsharkError) {
+    console.error(
+      {
+        op: "fund",
+        subUserId,
+        amount,
+        requestId: err.requestId,
+        code: err.code,
+        key: err.key,
+      },
+      err.message,
+    );
+  } else {
+    console.error({ op: "fund", subUserId, amount }, err);
+  }
+}
+```
+
+When you file a support request, paste two or three `requestId`s — they
+let us pull the full request/response and ledger trace from our side
+without back-and-forth.
+
+
+# Core API
+Source: https://skinshark.gg/docs/integration/core-api
+
+One merchant account, all activity in one place. Simplest integration.
+
+
+Core API is the single-account integration model. Your merchant key is the
+only identity that exists — every trade, deposit, and withdrawal posts to
+that one account. No sub-users, no `On-Behalf-Of`, no inter-account
+transfers.
+
+This is the right starting point if you operate one storefront, one
+treasury, one consolidated ledger.
+
+## Mental model
+
+```mermaid
+flowchart TB
+    backend["Your backend<br/>(one API key)"]
+    merchant["SkinShark<br/>(one merchant)"]
+    backend -->|api-key| merchant
+```
+
+## When this fits
+
+- One product, one storefront, one treasury.
+- You don't need per-customer balance isolation in SkinShark.
+- All reconciliation can happen at one merchant level.
+- Operations is a single team, not multi-tenant.
+
+If any of these *don't* apply, jump to
+[Full Platform](/integration/full-platform).
+
+## Endpoints you'll use
+
+All sub-user-context routes work without an `On-Behalf-Of` header — they
+run as the merchant. So you only ever need:
+
+| Action | Endpoint |
+|---|---|
+| Read merchant profile + balances | `GET /merchant` |
+| Read full ledger | `GET /merchant/ledger` |
+| Search the catalog | `GET /market/search` |
+| Bulk per-item price feed | `GET /market/prices` |
+| Live listings for an item | `GET /market/items/{itemId}/listings` |
+| Buy specific listings | `POST /market/buy` |
+| Buy by item, server picks fills | `POST /market/buy/quick` |
+| List trades | `GET /market/transactions` (or `GET /merchant/trades`) |
+| Get trade detail | `GET /market/transactions/{tradeId}` |
+| Stats (GMV, fees) | `GET /merchant/stats` |
+| Deposit (Gate Pay / on-ramp / crypto) | `POST /user/wallet/deposit/...` |
+
+## Skip these (for now)
+
+These endpoints are real, just not relevant in Core API mode:
+
+- `/merchant/users/*` — sub-user CRUD and funding
+- `/merchant/users/{id}/wallet` — sub-user wallet reads
+- `On-Behalf-Of` header — never needed
+
+You can adopt them later without breaking anything; they're additive.
+
+## Daily operation
+
+A typical day in Core API:
+
+<Steps>
+  <Step title="User browses">
+    Your frontend calls `GET /market/search` and `GET /market/items/{itemId}/listings`
+    to render inventory.
+  </Step>
+  <Step title="User buys">
+    `POST /market/buy` debits your merchant wallet by `totalPrice` and
+    creates a trade.
+  </Step>
+  <Step title="Server confirms">
+    A `trade.completed` webhook fires (or your WebSocket subscriber sees
+    `trade.completed`). Persist the trade against your own order table by
+    `externalId`.
+  </Step>
+  <Step title="Reconcile">
+    Nightly job calls `GET /merchant/ledger?type=spot` and `GET /merchant/stats`
+    against yesterday's window for accounting.
+  </Step>
+  <Step title="Top up">
+    When the merchant balance dips, deposit via Gate Pay / on-ramp /
+    crypto. The deposit credits the merchant wallet directly.
+  </Step>
+</Steps>
+
+## Code template
+
+```ts
+import { randomUUID } from "node:crypto";
+
+async function checkoutOnSkinShark(input: {
+  checkoutId: string;       // your order ID
+  listingId: string;
+  maxPrice: string;         // decimal string
+}) {
+  // Buy as the merchant (no On-Behalf-Of)
+  return api<{ id: string; status: string; totalPrice: number }>(
+    "/market/buy",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        items: [{ listingId: input.listingId, maxPrice: input.maxPrice }],
+        externalId: input.checkoutId,
+      }),
+    },
+  );
+}
+
+async function reconcileLastDay() {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const stats = await api<{
+    totals: { gmv: number; feesEarned: number; tradeCount: number };
+  }>(`/merchant/stats?from=${encodeURIComponent(since)}`);
+  return stats.totals;
+}
+```
+
+## What you give up
+
+- **No tenant isolation.** All trades show up under one merchant. If a
+  customer disputes, they're not separable in SkinShark's view.
+- **One ledger.** Per-customer accounting is your job, not SkinShark's.
+- **Migration cost later.** If your business needs per-customer wallets,
+  you'll move to Full Platform — usually a one-time refactor where you
+  swap one `api()` call signature to take a sub-user ID.
+
+## When to graduate
+
+Move to [Full Platform](/integration/full-platform) when you need:
+
+- Per-customer balance isolation (chargeback containment, audit clarity).
+- Multi-tenant reporting in the merchant dashboard.
+- Per-customer fee overrides.
+- Self-service crypto deposits per customer.
+
+The migration is mostly mechanical: provision a sub-user per customer,
+add `On-Behalf-Of`, route customer-attributable calls there. The catalog
+and trade primitives don't change.
+
+
+# Full Platform
+Source: https://skinshark.gg/docs/integration/full-platform
+
+One merchant account with isolated sub-users for each of your end customers. The recommended pattern for SaaS reselling.
+
+
+Full Platform is the multi-tenant model. You hold one merchant API key.
+Every end customer of yours gets a sub-user under it: their own wallet,
+their own trade history, their own Steam trade URLs. Money flows from your
+merchant treasury to sub-users via internal transfers, or directly to a
+sub-user via deposit.
+
+## Mental model
+
+```mermaid
+flowchart TB
+    backend["Your backend<br/>(one API key)"]
+    merchant["Merchant account<br/>(your treasury)"]
+    user42["user_42<br/>wallet"]
+    user43["user_43<br/>wallet"]
+    user44["user_44<br/>wallet"]
+    backend -->|api-key| merchant
+    merchant -->|fund| user42
+    merchant -->|fund| user43
+    merchant -->|fund| user44
+```
+
+Acting as a sub-user from your single merchant key is one header:
+
+```http
+On-Behalf-Of: user_42
+```
+
+See [Acting on behalf of a sub-user](/guides/on-behalf-of).
+
+## When this fits
+
+- You're building a product **on top of** SkinShark and reselling to your
+  own users.
+- Each user needs their own balance, trade history, and Steam connection.
+- You want chargeback / dispute isolation per user.
+- You want per-user reporting in the SkinShark dashboard.
+
+## Provisioning
+
+Create one sub-user per end customer when they sign up. Use your own
+internal user ID as `externalId` so you never have to persist the
+SkinShark UUID.
+
+```ts
+async function onboardCustomer(internalUserId: string, email: string) {
+  return api<{ id: string; externalId: string; currency: "USD" | "EUR" }>(
+    "/merchant/users",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        externalId: internalUserId,
+      }),
+    },
+  );
+}
+```
+
+<Note>
+`POST /merchant/users` is API-key-auth only. Provisioning happens
+server-to-server, never from a dashboard session.
+</Note>
+
+## Funding pattern
+
+There are two ways to put money in a sub-user's wallet:
+
+### (a) Internal transfer from merchant treasury
+
+You hold balance centrally and dispense it as customers need it. Idempotent.
+
+```ts
+import { randomUUID } from "node:crypto";
+
+async function fundOnCheckout(internalUserId: string, amount: string, checkoutId: string) {
+  return api<{ transactionId: string; idempotent: boolean }>(
+    `/merchant/users/${internalUserId}/fund`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": `checkout:${checkoutId}` },
+      body: JSON.stringify({ amount }),
+    },
+  );
+}
+```
+
+### (b) Direct deposit from the customer
+
+The customer pays SkinShark directly via Gate Pay / on-ramp / crypto. Run
+under `On-Behalf-Of` so the deposit credits the sub-user.
+
+```ts
+async function quoteCryptoDeposit(internalUserId: string, amount: number) {
+  return api<{
+    chains: Record<string, { feeCents: number; receiveAmount: number; gasGwei: number }>;
+  }>(
+    "/user/wallet/deposit/crypto/quote",
+    {
+      method: "POST",
+      body: JSON.stringify({ token: "USDT", amount }),
+    },
+    internalUserId,
+  );
+}
+```
+
+Most platforms use (a) for in-product purchases and (b) for top-ups
+initiated by the customer.
+
+## Buy flow
+
+Always tag with both the sub-user (`On-Behalf-Of`) and your own checkout
+ID (`externalId`). The first scopes wallet/trade-URL/history. The second
+makes retries idempotent and reconciliation trivial.
+
+```ts
+async function buyForCustomer(input: {
+  internalUserId: string;
+  checkoutId: string;
+  listingId: string;
+  maxPrice: string;
+}) {
+  return api<{ id: string; status: string; totalPrice: number }>(
+    "/market/buy",
+    {
+      method: "POST",
+      headers: { "on-behalf-of": input.internalUserId },
+      body: JSON.stringify({
+        items: [{ listingId: input.listingId, maxPrice: input.maxPrice }],
+        externalId: input.checkoutId,
+      }),
+    },
+  );
+}
+```
+
+## Reading customer state
+
+| Question | Endpoint |
+|---|---|
+| What's this customer's balance? | `GET /merchant/users/{id}/wallet` |
+| Their trade history? | `GET /merchant/users/{id}/trades` |
+| Their full ledger? | `GET /merchant/users/{id}/ledger` |
+| Cross-customer aggregate? | `GET /merchant/stats?from=&to=` |
+| All recent trades? | `GET /merchant/trades?cursor=` |
+| Top GMV customers this month? | `GET /merchant/stats` → `bySubUser` |
+
+Notice these are all on the **merchant** prefix — no `On-Behalf-Of`
+needed because the merchant is reading their own scope. `On-Behalf-Of` is
+for *acting as* a sub-user (buys, deposits), not reading their data.
+
+## Suspension and offboarding
+
+```ts
+// Suspend (read-only — login + buy blocked)
+await api(`/merchant/users/${internalUserId}/suspend`, { method: "POST" });
+
+// Reactivate
+await api(`/merchant/users/${internalUserId}/reactivate`, { method: "POST" });
+
+// Soft-delete (status=deleted, wallet closed)
+await api(`/merchant/users/${internalUserId}`, { method: "DELETE" });
+```
+
+Suspension is reversible; deletion is not. After deletion, the wallet's
+balance must be zero — withdraw or sweep first.
+
+## Treasury and fees
+
+Your merchant has two wallets:
+
+- **`spot`** — what you fund customers from, what direct merchant trades
+  debit.
+- **`earnings`** — credited at trade settlement when your `merchantFeeBps`
+  > 0. This is your cut on customer purchases.
+
+```ts
+const merchant = await api<{
+  wallets: {
+    spot: { currency: string; balance: number };
+    earnings: { currency: string; balance: number };
+  };
+}>("/merchant");
+```
+
+Read fees with `GET /merchant/fees`. Fee changes are dashboard-only — the
+API exposes them read-only so you can render them in your UI without
+giving an automated client the power to change them.
+
+## Reconciliation pattern
+
+Nightly job, in pseudocode:
+
+```ts
+async function nightly() {
+  const since = startOfYesterdayISO();
+  const until = startOfTodayISO();
+
+  // 1. Aggregate stats
+  const stats = await api<{
+    totals: { gmv: number; feesEarned: number; tradeCount: number };
+    bySubUser: Array<{ externalId: string; gmv: number }>;
+  }>(`/merchant/stats?from=${since}&to=${until}`);
+
+  // 2. Walk all trades that completed in the window for full ledger
+  let cursor: string | undefined;
+  const trades = [];
+  do {
+    const page = await api<{
+      items: Array<{ id: string; externalId: string | null; settledAt?: string }>;
+      nextCursor: string | null;
+    }>(
+      `/merchant/trades?status=completed&from=${since}&to=${until}&limit=100` +
+        (cursor ? `&cursor=${cursor}` : ""),
+    );
+    trades.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+
+  // 3. Match against your own order table by externalId
+  for (const t of trades) {
+    if (!t.externalId) continue;
+    await markCheckoutSettled(t.externalId, t.settledAt);
+  }
+}
+```
+
+## Common mistakes
+
+<AccordionGroup>
+  <Accordion title="Reusing one externalId across customers">
+    `externalId` is unique per `(merchantId, userId)` for users and per
+    `(userId, externalId)` for trades. Don't recycle values across
+    customers — pick something globally unique to your platform.
+  </Accordion>
+  <Accordion title="Forgetting On-Behalf-Of on /market/buy">
+    The buy succeeds, but it buys *for the merchant*, not the customer.
+    See [Acting on behalf of](/guides/on-behalf-of#mistakes-to-watch-for)
+    for the defensive pattern.
+  </Accordion>
+  <Accordion title="Skipping idempotency on /fund">
+    Network retries that don't carry the same `Idempotency-Key` will
+    double-fund. The header is required — the API rejects calls without
+    it — but make sure your retry loop reuses the same key, not a fresh
+    UUID each attempt.
+  </Accordion>
+  <Accordion title="Treating suspension like deletion">
+    Suspending a sub-user freezes them; their wallet balance and trade
+    history are intact. Use `DELETE` only when you mean it: it's
+    irreversible and requires a zero balance.
+  </Accordion>
+</AccordionGroup>
+
+
+# Partner Crypto Payout Custody
+Source: https://skinshark.gg/docs/integration/partner-crypto-payout
+
+Separate per-merchant USD-denominated crypto custody — deposit USDT/USDC, then pay out on-chain to your own users' addresses. Toggleable per merchant, gated by a synchronous approval callback.
+
+
+Partner Payout Custody is a **second** wallet behind your merchant account
+that's intentionally **walled off** from the spot/skin-buying pipeline. You
+deposit USDT or USDC; we hold it; you instruct withdrawals to any EVM
+address. Useful when you want to use SkinShark as the crypto rail for your
+own user payouts without commingling funds with skin-trading flows.
+
+## Mental model
+
+```mermaid
+flowchart TB
+    you["Your backend"]
+    payoutAddr["Payout forwarder<br/>(distinct from spot)"]
+    payoutBal["Payout custody<br/>(per chain × token)"]
+    dest["Destination<br/>(your user's wallet)"]
+    you -->|deposit USDT/USDC| payoutAddr
+    payoutAddr -->|credited to| payoutBal
+    you -->|POST /payout/crypto/withdraw| payoutBal
+    payoutBal -.->|approval callback to you| you
+    payoutBal -->|on-chain transfer| dest
+```
+
+## Hard constraints
+
+<Warning>
+**Withdrawals are per (chain, token), not from a single pool.** SkinShark
+holds no cross-chain liquidity. If you deposit USDC on Base, you can only
+withdraw it on Base — not Ethereum, not Arbitrum. Each (chain, tokenAddress)
+is an independent bucket. Use [`GET /payout/crypto/balances`](/api-reference/endpoint/getPayoutCryptoBalances)
+to see what's available where.
+</Warning>
+
+<Warning>
+The withdrawal endpoint is **API-key only**. The read endpoints
+(`/address`, `/balances`, `/withdraw/quote`, list, detail) accept JWT
+too so the merchant dashboard can show state, but submitting a withdrawal
+must come from your backend.
+</Warning>
+
+## Prerequisites
+
+1. **Feature flag.** Your merchant account needs `cryptoPayoutEnabled: true`
+   (admin-controlled). Without it, all `/payout/crypto/*` endpoints return
+   `1820 CRYPTO_PAYOUT_NOT_ENABLED`.
+2. **Callback URL registered.** At least one active `CallbackUrl` on your
+   merchant — this is where the approval callback and lifecycle events land.
+   Use the dashboard's Webhooks tab.
+3. **Webhook secret registered.** Approval callbacks and lifecycle events are
+   signed the same way as every other event ([Webhooks](/guides/webhooks)).
+   Verify them.
+
+## Setup
+
+### 1. Allocate the payout forwarder
+
+```http
+GET /user/wallet/payout/crypto/address
+api-key: sk_live_...
+```
+
+Returns a CREATE2-derived EVM address valid on all supported chains.
+**This address is distinct from your spot deposit forwarder.** Sending
+funds to the spot forwarder credits your spot wallet (and funds skin
+buys); sending to the payout forwarder credits your partner custody.
+Don't confuse them.
+
+```json
+{
+  "address": "0x6b3a...c41e",
+  "chains": ["ethereum", "base", "arbitrum", "optimism", "bsc"],
+  "tokens": ["USDT", "USDC"]
+}
+```
+
+### 2. Fund the address
+
+Send USDT or USDC on any supported chain. Once confirmed:
+
+- A `payout_credit` ledger transaction is posted.
+- The corresponding per-(chain, token) sidecar row is incremented.
+- We emit `payout.crypto.deposit.completed` to your callback URL.
+
+There's a $1 minimum per deposit (gas-aware floor — below this we don't
+credit because the sweep economics break down).
+
+### 3. List balances
+
+```http
+GET /user/wallet/payout/crypto/balances
+```
+
+```json
+{
+  "balances": [
+    { "chain": "base", "token": "USDC", "tokenAddress": "0x833589fc...", "balanceCents": "1024750" },
+    { "chain": "ethereum", "token": "USDC", "tokenAddress": "0xa0b86991...", "balanceCents": "0" }
+  ]
+}
+```
+
+`balanceCents` is USD cents as a bigint string. One row per chain × token
+combination you've ever deposited to.
+
+## Withdrawing
+
+### Preview the fee first
+
+The withdrawal fee reflects current network gas. On L2 chains (Base,
+Arbitrum, Optimism) the fee is `0`.
+
+```http
+POST /user/wallet/payout/crypto/withdraw/quote
+Content-Type: application/json
+
+{ "chain": "ethereum", "token": "USDC", "amountCents": "100000" }
+```
+
+```json
+{
+  "chain": "ethereum",
+  "token": "USDC",
+  "amountCents": "100000",
+  "liveFeeUsdCents": "247",
+  "liveTotalDebitCents": "100247",
+  "stats24h": {
+    "minFeeUsdCents": "92",
+    "p25FeeUsdCents": "139",
+    "avgFeeUsdCents": "219",
+    "p75FeeUsdCents": "276",
+    "maxFeeUsdCents": "640"
+  },
+  "computedAt": "2026-05-18T12:34:56.789Z"
+}
+```
+
+The `stats24h` block lets you decide whether *now* is a cheap moment vs
+typical. Quote is advisory — no state mutated.
+
+### Submit the withdrawal
+
+<Note>
+**Requires API key** (`api-key` header). JWT auth is rejected on this one
+endpoint. This is the only mutating action in the payout group.
+</Note>
+
+```http
+POST /user/wallet/payout/crypto/withdraw
+api-key: sk_live_...
+Content-Type: application/json
+
+{
+  "chain": "ethereum",
+  "token": "USDC",
+  "destination": "0xRECIPIENT...",
+  "amountCents": "100000",
+  "externalId": "payout-2026-05-18-001",
+  "forSubUser": "your-end-user-id",
+  "maxFeeUsdCents": "500"
+}
+```
+
+| Field | Notes |
+|---|---|
+| `chain`, `token` | The bucket you're drawing from. Must match a sidecar row with enough balance. |
+| `destination` | Any valid EVM address. Cannot be your own forwarder or the SkinShark treasury. |
+| `amountCents` | USD cents to send to `destination`. Fee is added on top. |
+| `externalId` | **Required.** Your idempotency key. Must be unique per merchant. We echo this back in the approval callback so you can match against your records. |
+| `forSubUser` | **Optional label.** Sub-user UUID or your `externalId` for them. Funds always come from your merchant custody — this just tags the withdrawal for your audit/reporting. |
+| `maxFeeUsdCents` | **Optional cap.** If live fee exceeds this, returns `1821` and nothing happens. |
+
+Response:
+
+```json
+{
+  "id": "8a3f...",
+  "status": "pending_callback",
+  "chain": "ethereum",
+  "token": "USDC",
+  "destination": "0xrecipient...",
+  "amountCents": "100000",
+  "feeCents": "247",
+  "externalId": "payout-2026-05-18-001",
+  "forUserId": "uuid-of-sub-user",
+  "forUserExternalId": "your-end-user-id",
+  "createdAt": "2026-05-18T12:34:57.123Z"
+}
+```
+
+The withdrawal is now `pending_callback` — funds debited from your sidecar
++ a `payout_withdraw_lock` ledger entry posted — and we're about to ping
+your callback URL.
+
+## The approval callback (the 2FA gate)
+
+Within ~1 second of accepting your `/withdraw` request, our worker POSTs
+to your registered callback URL. The body uses the **same envelope shape**
+as every other webhook event:
+
+```json
+{
+  "id": "01HF3K6...",
+  "type": "payout.crypto.withdraw.approval",
+  "createdAt": "2026-05-18T12:34:57.123Z",
+  "data": {
+    "withdrawal": {
+      "id": "8a3f...",
+      "userId": "...",
+      "externalId": "payout-2026-05-18-001",
+      "forUserId": "uuid-of-sub-user",
+      "forUserExternalId": "your-end-user-id",
+      "status": "pending_callback",
+      "chain": "ethereum",
+      "token": "USDC",
+      "tokenAddress": "0xa0b86991...",
+      "destination": "0xrecipient...",
+      "amountCents": 100000,
+      "feeCents": 247,
+      "amountWei": "100000000",
+      "txHash": null,
+      "failureReason": null,
+      "callbackAttempts": 0,
+      "createdAt": "2026-05-18T12:34:57.123Z",
+      "broadcastAt": null,
+      "confirmedAt": null
+    }
+  }
+}
+```
+
+**Signature:** same `webhook-id` / `webhook-timestamp` / `webhook-signature`
+scheme as every other event. Verify on the raw body. Because the envelope
+matches, one verifier handles approval and lifecycle events alike — dispatch
+on `event.type`.
+
+**Your job:** look up `data.withdrawal.externalId` in your records. Confirm
+you created this withdrawal with these exact parameters. Return:
+
+- **2xx within 5 seconds** → withdrawal proceeds to `queued` → `broadcast` → `confirmed`.
+- **4xx** → withdrawal is immediately refunded. Sidecar restored. `payout_withdraw_refund` ledger entry posted.
+- **5xx / timeout / network error** → we retry up to 3 times with backoff. After the 3rd attempt fails, refund.
+
+This is your hard authentication boundary. Treat it like a 2FA prompt.
+
+### Example handler
+
+```ts
+import express from "express";
+import { verifyWebhook, isError } from "@skinshark/sdk";
+
+app.post(
+  "/webhooks/skinshark",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    let event;
+    try {
+      event = verifyWebhook(req.body, req.headers, { secret: SECRET });
+    } catch (e) {
+      if (isError(e, "INVALID_SIGNATURE")) return res.status(401).end();
+      throw e;
+    }
+
+    if (event.type === "payout.crypto.withdraw.approval") {
+      const w = event.data.withdrawal;
+      const ourRecord = await db.payouts.findUnique({
+        where: { externalId: w.externalId },
+      });
+      if (!ourRecord) return res.status(404).end();   // unknown → refund
+      if (
+        ourRecord.destination.toLowerCase() !== w.destination.toLowerCase() ||
+        ourRecord.amountCents !== w.amountCents ||
+        ourRecord.chain !== w.chain ||
+        ourRecord.token !== w.token
+      ) {
+        return res.status(400).end();                 // mismatch → refund
+      }
+      return res.status(200).end();                   // authorize
+    }
+
+    // ... other events (lifecycle, deposit.completed)
+    return res.status(200).end();
+  },
+);
+```
+
+## Lifecycle events
+
+After approval (or rejection), you get standard signed webhooks for the
+lifecycle — **same envelope as the approval callback**:
+
+| Event | Fired when | Carries |
+|---|---|---|
+| `payout.crypto.deposit.completed` | A deposit credited your payout custody | `data.deposit` + `data.forUserExternalId` |
+| `payout.crypto.withdraw.broadcast` | On-chain transaction submitted | `data.withdrawal` with `txHash` |
+| `payout.crypto.withdraw.confirmed` | Final confirmation reached | `data.withdrawal` with `txHash` |
+| `payout.crypto.withdraw.refunded` | Any rejection, failure, or on-chain revert — sidecar re-credited, ledger reversed. The single terminal failure event (no separate `.failed`). | `data.withdrawal` with `failureReason` |
+
+These follow the **standard** webhook delivery rules from
+[Webhooks](/guides/webhooks): 11 retries over ~15h, auto-disable on 72h
+continuous failure, signed with your webhook secret.
+
+The synchronous `approval` callback uses the same body and signing scheme
+but **bypasses the retry queue**: the worker POSTs directly, 5 s timeout,
+3 retries on transient failure, then refund. See the Webhooks guide for
+the full comparison table.
+
+## Polling status as a fallback
+
+If you'd rather poll than rely on webhooks (or want to double-check):
+
+```http
+GET /user/wallet/payout/crypto/withdrawals/{id}
+GET /user/wallet/payout/crypto/withdrawals?status=broadcast&chain=ethereum&limit=50
+```
+
+The list endpoint supports cursor pagination, plus filtering by `status`,
+`chain`, and `forUserId` (the resolved sub-user UUID — not the externalId
+you supplied at create).
+
+## Edge cases
+
+- **Insufficient (chain, token) balance.** Returns `1822` *before* any state
+  is touched. Per-(chain, token) sidecar gating; no draws from other chains.
+- **Live fee exceeds your `maxFeeUsdCents`.** Returns `1821`. Nothing locked,
+  no callback fired. Submit again when gas drops.
+- **Duplicate `externalId`.** Returns `1824`. Pick a new value. Idempotency
+  on this key is by design — re-submitting the same `externalId` is **not**
+  retried, it's rejected so you can detect bugs in your dispatcher.
+- **Callback URL missing or all disabled.** Returns `1823` at submit time.
+  Re-register a URL, then submit.
+- **`forSubUser` doesn't exist or isn't yours.** Returns `1825`. The lookup
+  is scoped to your `parentId` — you can only tag your own children.
+- **Sub-user suspended / soft-deleted.** Allowed. `forUserId` is a label, not
+  an auth scope — the withdrawal still goes through.
+- **Reorg reverses a payout deposit.** Pre-existing pipeline gap; we don't
+  currently issue reversal postings on reorg. Track this in the SkinShark
+  admin treasury views and reach out if it affects you.
+
+## Verification checklist
+
+After integrating, run these against the testnet:
+
+1. Allocate the payout forwarder. Confirm it differs from `/deposit/crypto/address`.
+2. Send testnet USDC. Watch for `payout.crypto.deposit.completed` and a sidecar row.
+3. Submit to the spot forwarder simultaneously — confirm that one credits the
+   spot wallet, not the payout custody. (Routing is by which forwarder
+   received funds — the flag never re-routes in-flight deposits.)
+4. Quote → withdraw with a mock callback returning 200. Status progresses
+   `queued → broadcast → confirmed`. Tx visible at destination.
+5. Quote → withdraw with a mock callback returning 403 → immediate
+   `refunded`, sidecar restored, payout wallet balance restored. (A 5xx /
+   timeout retries up to 3 times before the same `refunded` outcome.)
+6. Re-submit the same `externalId` → returns the **original** withdrawal
+   (idempotent replay), not a new one or an error.
+7. `maxFeeUsdCents: "1"` → `1821`.
+8. `amountCents` larger than your (chain, token) balance → `1822`.
+
+
+# SDK & TypeScript types
+Source: https://skinshark.gg/docs/guides/sdk
+
+Use the official @skinshark/sdk for the fastest path, or generate types from the OpenAPI spec for typed fetch.
+
+
+There are two supported ways to call the API from TypeScript. Use the
+official SDK if you want a polished client; generate types if you'd rather
+keep your own HTTP code.
+
+## Option 1 — official SDK (recommended)
+
+```bash
+npm install @skinshark/sdk
+```
+
+```ts
+import { Skinshark, SkinsharkError, isError, meta } from "@skinshark/sdk";
+
+const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+
+// Merchant context
+const profile = await sdk.account.get();
+const stats = await sdk.account.stats({ from: "2026-01-01T00:00:00Z" });
+
+// Sub-user context — bind once, then call as that user
+const user = await sdk.as("user_42");           // validates ownership at bind time
+const trade = await user.market.buy(
+  [{ listingId, maxPrice: "5.00" }],
+  "order-7421",                                  // your correlation id
+);
+
+// Or one-off via opts
+await sdk.market.buy(items, "order-1", { onBehalfOf: "user_42" });
+```
+
+The package is **ESM-only**, **Node 22+**, server-to-server. It uses `got`
+under the hood, ships zero runtime deps beyond that, and exposes:
+
+- `sdk.account`, `sdk.users`, `sdk.trades` — merchant-only
+- `sdk.profile`, `sdk.tradeUrls`, `sdk.wallet`, `sdk.deposits`, `sdk.market` — actor-context
+- `sdk.as(ref)` — async, validates the ref and returns a sub-user-bound view
+- `sdk.health()`, `sdk.newIdempotencyKey()`, `sdk.request<T>(...)` — utilities
+- `verifyWebhook(rawBody, headers, { secret })` — signature verification (zero deps beyond `node:crypto`)
+- `meta(response)` — read `requestId`, `status`, `headers`, `rateLimit` from any successful response
+
+```ts
+import { verifyWebhook, isError } from "@skinshark/sdk";
+
+try {
+  const event = verifyWebhook(rawBody, req.headers, {
+    secret: process.env.SKINSHARK_WH_SECRET!,
+  });
+  switch (event.type) {
+    case "trade.completed": /* ... */ break;
+    case "deposit.completed": /* ... */ break;
+  }
+} catch (e) {
+  if (isError(e, "INVALID_SIGNATURE")) return res.status(401).end();
+  throw e;
+}
+```
+
+### Type-only imports
+
+For UI/server code that just needs the wire types without the runtime
+client, import from the `/types` subpath:
+
+```ts
+import type {
+  Trade,
+  MarketListing,
+  BuyBody,
+  ErrorKey,
+} from "@skinshark/sdk/types";
+```
+
+### Errors
+
+A single `SkinsharkError` class is thrown for every failure. Branch on the
+discriminated `key`:
+
+```ts
+import { SkinsharkError, isError, isAuthError, isRateLimited } from "@skinshark/sdk";
+
+try {
+  await sdk.market.buy(items, "order-1", { onBehalfOf: "u-1" });
+} catch (e) {
+  if (!(e instanceof SkinsharkError)) throw e;
+
+  if (isError(e, "INSUFFICIENT_BALANCE")) /* refill */;
+  if (isError(e, "PRICE_MISMATCH"))       /* refresh listing */;
+  if (isError(e, "TRADEURL_REQUIRED"))    /* prompt user */;
+  if (isAuthError(e))                     /* rotate key */;
+  if (isRateLimited(e))                   await sleep(e.retryAfterMs ?? 1000);
+
+  console.error({ key: e.key, requestId: e.requestId });   // for support
+}
+```
+
+See [Error handling](/guides/error-handling) for retry strategy and the
+full key catalogue at [reference/errors](/reference/errors).
+
+## Option 2 — generate types from the OpenAPI spec
+
+If you'd rather not pull in the SDK runtime — for example, you're calling
+from a non-Node runtime or already have an HTTP client you're happy with —
+generate a `paths` type from the spec and pair it with a tiny `fetch`
+wrapper.
+
+```bash
+npm install -D openapi-typescript
+npx openapi-typescript \
+  https://api.skinshark.gg/openapi.yaml \
+  -o src/skinshark-types.ts
+```
+
+```ts
+import type { paths } from "./skinshark-types";
+
+type CreateSubUserBody =
+  paths["/merchant/users"]["post"]["requestBody"]["content"]["application/json"];
+
+type CreateSubUserResponse =
+  paths["/merchant/users"]["post"]["responses"]["201"]["content"]["application/json"]["data"];
+
+type ListTradesQuery = NonNullable<
+  paths["/merchant/trades"]["get"]["parameters"]["query"]
+>;
+```
+
+### A typed fetch helper
+
+```ts
+import type { paths } from "./skinshark-types";
+
+type Method = "get" | "post" | "patch" | "delete";
+
+type SuccessData<P extends keyof paths, M extends Method> =
+  paths[P][M] extends { responses: { 200: { content: { "application/json": { data: infer D } } } } }
+    ? D
+    : paths[P][M] extends { responses: { 201: { content: { "application/json": { data: infer D } } } } }
+      ? D
+      : never;
+
+export async function call<P extends keyof paths, M extends Method>(
+  method: M,
+  path: P,
+  init?: { body?: unknown; onBehalfOf?: string; query?: Record<string, string>; idempotencyKey?: string },
+): Promise<SuccessData<P, M>> {
+  const qs = init?.query
+    ? "?" + new URLSearchParams(init.query).toString()
+    : "";
+
+  const headers: Record<string, string> = {
+    "api-key": process.env.SKINSHARK_API_KEY!,
+    "content-type": "application/json",
+  };
+  if (init?.onBehalfOf) headers["on-behalf-of"] = init.onBehalfOf;
+  if (init?.idempotencyKey) headers["idempotency-key"] = init.idempotencyKey;
+
+  const res = await fetch(`https://api.skinshark.gg${path}${qs}`, {
+    method: method.toUpperCase(),
+    headers,
+    body: init?.body ? JSON.stringify(init.body) : undefined,
+  });
+
+  const env = await res.json();
+  if (!env.success) {
+    const e = env.error;
+    throw new SkinsharkError(env.requestId, e.code, e.key, e.message);
+  }
+  return env.data;
+}
+```
+
+```ts
+const profile = await call("get", "/merchant");
+//    ^? { id: string; email: string; merchantFeeBps: number; ... }
+
+const sub = await call("post", "/merchant/users", {
+  body: { email: "alice@example.com", externalId: "user_42" },
+});
+//    ^? { id: string; externalId: string | null; idempotent: boolean; ... }
+
+const trades = await call("get", "/merchant/trades", {
+  query: { status: "completed", limit: "50" },
+});
+//    ^? { items: Trade[]; nextCursor: string | null }
+```
+
+Zero runtime dependencies, types drift automatically as the spec evolves,
+and the wrapper is ~30 lines. Pin the spec to a git tag (or a vendored
+copy) for stable types between releases.
+
+## Webhook signature verification
+
+The SDK ships a `verifyWebhook(rawBody, headers, { secret })` helper that
+follows [Standard Webhooks](https://www.standardwebhooks.com/) — see the
+[Webhooks guide](/guides/webhooks#signature-verification) for the full
+shape and example handlers.
+
+If you're not using the SDK, the verification is ~30 lines of
+`node:crypto` — copy from the same guide, or use any Standard Webhooks
+library from npm.
+
+
+# Webhooks
+Source: https://skinshark.gg/docs/guides/webhooks
+
+Server-to-server delivery of trade and deposit events using the Standard Webhooks signature scheme, with bounded retries and auto-disable on continuous failure.
+
+
+Webhooks are how SkinShark notifies your server when something happens to
+a trade or deposit. They're durable: failed deliveries are retried with
+backoff. For low-latency in-app updates, pair them with
+[WebSocket](/guides/websocket) — webhooks for state-of-record, sockets
+for UX.
+
+The headers and signature scheme follow [Standard Webhooks](https://www.standardwebhooks.com/),
+so any Standard Webhooks library will verify our payloads out of the box.
+
+## Configuring
+
+Webhook URLs and signing secrets are dashboard-only operations
+(API-key auth can't change them). In your merchant dashboard:
+
+1. **Webhooks** tab → set the callback URL.
+2. **Webhook secret** tab → create a secret. The raw secret is shown
+   once at creation; the server stores only an encrypted copy.
+3. Optionally hit "Test" to fire a one-shot delivery against the URL.
+
+## Event types
+
+Trade lifecycle:
+
+- `trade.initiated` — buy accepted, escrow held, items not yet placed at the marketplace.
+- `trade.pending` — marketplace worker successfully placed the order; awaiting fulfillment.
+- `trade.active` — marketplace is processing/delivering.
+- `trade.hold` — items received, holding for the dispute window.
+- `trade.completed` — hold released, trade settled.
+- `trade.failed` — terminal failure (insufficient supply, marketplace decline, etc.).
+- `trade.reverted` — items recalled or refunded after the marketplace accepted.
+- `trade.settled` — fee/earnings ledger postings completed (paired with `trade.completed`).
+- `trade.refunded` — full or partial refund posted to the user wallet.
+
+Deposit lifecycle:
+
+- `deposit.initiated`
+- `deposit.pending`
+- `deposit.completed`
+- `deposit.partial`
+- `deposit.expired`
+- `deposit.failed`
+- `deposit.refunded`
+- `deposit.cancelled`
+
+Partner crypto payout custody:
+
+- `payout.crypto.deposit.completed` — a deposit landed in the partner's payout custody (per-(chain, token) sidecar credited). **Distinct from `deposit.completed`** — the latter is for spot wallet credits.
+- `payout.crypto.withdraw.approval` — **synchronous approval gate**, see below. Special delivery semantics.
+- `payout.crypto.withdraw.broadcast` — withdrawal broadcast on-chain. Includes `txHash` and `nonce`.
+- `payout.crypto.withdraw.confirmed` — final confirmation reached.
+- `payout.crypto.withdraw.refunded` — the **single terminal failure event**: any approval rejection, broadcast failure, or on-chain revert re-credits the sidecar and restores the payout wallet. There is no separate `.failed` event.
+
+## The approval callback — synchronous, not queued
+
+`payout.crypto.withdraw.approval` uses the **same envelope, headers, and signature scheme** as
+every other event — only the delivery semantics differ:
+
+| Property | Approval callback | All other events |
+|---|---|---|
+| Body shape | Same `{ id, type, createdAt, data }` envelope | Same |
+| Headers + signature | `webhook-id` / `webhook-timestamp` / `webhook-signature`, HMAC-SHA256 | Same |
+| Delivery | Direct HTTP POST from the worker | Queued via the standard webhook processor |
+| Timeout | **5 seconds** | 10 seconds + retries |
+| Required response | **2xx within timeout** | 2xx eventually, retried otherwise |
+| Failure mode | Explicit 4xx → immediate refund. 5xx/timeout/network → up to 3 retries, then refund. | Retried 11 times over ~15h |
+| Purpose | **Gate** the withdrawal — your 2xx is the merchant-side "yes, I authorized this" | Notify after-the-fact |
+
+Because the envelope and signing match every other event, one handler with one Standard
+Webhooks verifier can ingest approvals alongside lifecycle events — just dispatch on
+`event.type === 'payout.crypto.withdraw.approval'` to apply the synchronous behavior below.
+
+When your server receives `payout.crypto.withdraw.approval`:
+
+1. Verify the signature (same scheme as every other event).
+2. Look up `data.withdrawal.externalId` in your records. If you didn't create this withdrawal — respond **4xx immediately** to refund.
+3. If you did create it, confirm `destination`, `amountCents`, and `forUserExternalId` match what you expect.
+4. Return 2xx within 5 seconds → the worker proceeds to `queued` → `broadcast`.
+5. Return 4xx → withdrawal is immediately refunded.
+
+If you simply forgot to register a callback URL, the withdrawal fails with `1823 CRYPTO_PAYOUT_NO_CALLBACK_URL` at submission time — it never reaches this stage.
+
+### Approval payload shape
+
+```json
+{
+  "id": "01HF3K6...",
+  "type": "payout.crypto.withdraw.approval",
+  "createdAt": "2026-05-18T12:34:56.000Z",
+  "data": {
+    "withdrawal": {
+      "id": "8a3f...",
+      "userId": "...",
+      "externalId": "merchant-ref-001",
+      "forUserId": "uuid-or-null",
+      "forUserExternalId": "your-subuser-ref-or-null",
+      "status": "pending_callback",
+      "chain": "ethereum",
+      "token": "USDC",
+      "tokenAddress": "0xa0b8...",
+      "destination": "0x...",
+      "amountCents": 100000,
+      "feeCents": 247,
+      "amountWei": "100000000",
+      "txHash": null,
+      "failureReason": null,
+      "callbackAttempts": 0,
+      "createdAt": "2026-05-18T12:34:56.000Z",
+      "broadcastAt": null,
+      "confirmedAt": null
+    }
+  }
+}
+```
+
+The async lifecycle events (`payout.crypto.withdraw.broadcast`, `.confirmed`,
+`.refunded`) carry the **exact same** `data.withdrawal` shape — only `status`, `txHash`,
+`broadcastAt`, `confirmedAt`, and `failureReason` differ across the lifecycle.
+
+## Envelope
+
+Every delivery body is JSON in this shape — including the synchronous approval callback:
+
+```ts
+interface WebhookEnvelope {
+  id: string;                 // delivery UUID — same value as `webhook-id` header
+  type: string;               // event type, e.g. "trade.completed"
+  createdAt: string;          // ISO-8601
+  data:
+    | {
+        trade: Trade;                   // same shape as GET /merchant/trades/{id}
+        settlement?: { houseFeeCents: number; merchantFeeCents: number };
+      }
+    | { deposit: Deposit }
+    | {
+        deposit: Deposit;
+        forUserExternalId: string | null;
+      }                                  // payout.crypto.deposit.completed
+    | {
+        withdrawal: PayoutWithdrawal;    // shape mirrors GET /payout/crypto/withdrawals/{id}
+      };                                 // payout.crypto.withdraw.{approval,broadcast,confirmed,refunded}
+}
+```
+
+Trade events carry the same `Trade` object you'd get from the trade
+detail endpoint — `id`, `status`, `currency`, `totalPrice`, full
+`items` array, etc. The `items` array reflects the trade's state at
+event-delivery time, including each item's price, marketplace,
+delivery mode, status, and display metadata as it becomes available.
+Settlement events (`trade.settled`, `trade.completed`) additionally
+include the fee breakdown. Deposit events carry a serialised deposit
+(gateway or self-hosted crypto fields, depending on method).
+
+## Delivery headers
+
+| Header | Purpose |
+|---|---|
+| `content-type: application/json` | Always. |
+| `user-agent: SkinShark-Webhooks/1.0` | Identifies us. |
+| `webhook-id` | Delivery UUID — use this for idempotency on your side. Stable across retries of the same event. |
+| `webhook-timestamp` | Unix epoch **seconds** at the moment of signing. |
+| `webhook-signature` | `t=<unix>,s=<base64url-hmac>` (and `s1=<old>` during secret rotation). |
+
+`webhook-signature` is space-separated-value style: `t=...` is the
+timestamp, `s=...` is the current-secret signature, and `s1=...` (when
+present) is the previous-secret signature for the rotation window.
+
+## Signature verification
+
+The signature is HMAC-SHA256 over `<id>.<timestamp>.<raw_body>` keyed
+with your secret, encoded as **base64url** (no padding).
+
+**Verify on the raw bytes, before JSON parsing** — re-serialised JSON has
+different whitespace and won't match.
+
+### With `@skinshark/sdk`
+
+```ts
+import express from "express";
+import { verifyWebhook, isError } from "@skinshark/sdk";
+
+const app = express();
+const SECRET = process.env.SKINSHARK_WEBHOOK_SECRET!;
+
+app.post(
+  "/webhooks/skinshark",
+  express.raw({ type: "application/json" }),     // raw bytes, not parsed JSON
+  async (req, res) => {
+    let event;
+    try {
+      event = verifyWebhook(req.body, req.headers, { secret: SECRET });
+    } catch (e) {
+      if (isError(e, "INVALID_SIGNATURE")) return res.status(401).end();
+      throw e;
+    }
+
+    // event is typed as a discriminated WebhookEvent union.
+    if (await alreadyProcessed(event.id)) return res.status(200).end();
+    await handleEvent(event);
+    await markProcessed(event.id);
+    return res.status(200).end();
+  },
+);
+```
+
+`verifyWebhook` checks the timestamp tolerance (default 300s, configurable
+via `toleranceSeconds`), validates the HMAC against `s=` and the rotation
+slot `s1=`, and returns the parsed event. It throws `SkinsharkError` with
+`key: "INVALID_SIGNATURE"` on any failure mode.
+
+### Without the SDK
+
+If you don't want the SDK runtime, the verification is ~30 lines of
+`node:crypto`:
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { Buffer } from "node:buffer";
+
+interface VerifyResult {
+  ok: boolean;
+  reason?: "missing-header" | "stale-timestamp" | "bad-signature";
+}
+
+export function verifySkinSharkSignature(
+  id: string | undefined,
+  timestamp: string | undefined,
+  signatureHeader: string | undefined,
+  rawBody: Buffer,
+  secret: string,
+  toleranceSec = 300,
+): VerifyResult {
+  if (!id || !timestamp || !signatureHeader) return { ok: false, reason: "missing-header" };
+
+  const skew = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (!Number.isFinite(skew) || skew > toleranceSec) return { ok: false, reason: "stale-timestamp" };
+
+  // Header format: t=<ts>,s=<sig>[,s1=<sig>]
+  const parts = Object.fromEntries(
+    signatureHeader.split(",").map((kv) => {
+      const i = kv.indexOf("=");
+      return [kv.slice(0, i).trim(), kv.slice(i + 1).trim()];
+    }),
+  );
+
+  const candidates = [parts.s, parts.s1].filter(Boolean) as string[];
+  if (candidates.length === 0) return { ok: false, reason: "bad-signature" };
+
+  const signed = `${id}.${timestamp}.${rawBody.toString("utf8")}`;
+  const expected = createHmac("sha256", secret).update(signed).digest("base64url");
+  const a = Buffer.from(expected);
+
+  for (const c of candidates) {
+    const b = Buffer.from(c);
+    if (a.length === b.length && timingSafeEqual(a, b)) return { ok: true };
+  }
+  return { ok: false, reason: "bad-signature" };
+}
+```
+
+## Retries and disabling
+
+- Deliveries enqueue immediately and run as a background processor.
+- Failed deliveries (non-2xx, timeout, network error) retry on a fixed
+  schedule — **11 attempts total** spread over ~14¾ hours per event:
+  30s, 30s, 5m, 5m, 15m, 15m, 1h, 1h, 6h, 6h.
+- After 11 attempts, the delivery is marked `exhausted` — no further
+  retries for that event.
+- The same `webhook-id` is reused on every retry of the same event.
+- If your callback URL is failing **continuously for 72 hours** (no
+  intervening success), the URL is auto-disabled. Fix the endpoint, then
+  re-enable from the dashboard. Until then, new events are queued but
+  not delivered.
+- Use **resend** in the dashboard or via API to retry an exhausted /
+  individual delivery on demand.
+
+<Tip>
+Make your handler idempotent on `webhook-id`. Persist the processed
+event before acking and skip duplicates. The simplest pattern: a unique
+constraint on `webhook_id` in your inbox table.
+</Tip>
+
+## Testing locally
+
+Use a public tunnel (ngrok, Cloudflare Tunnel) to expose your local
+handler, set the URL in the dashboard, then hit "Test" to fire a
+synthetic event — or trigger a real one with a tiny buy.
+
+```bash
+ngrok http 3000
+# Set dashboard webhook URL to: https://<id>.ngrok-free.app/webhooks/skinshark
+```
+
+## Inspecting deliveries
+
+The merchant dashboard's **Webhooks → Deliveries** tab lists every
+attempt with the request payload, response status, response headers,
+truncated response body, and error if any. Useful for debugging
+signature verification because you can see exactly what we sent.
+
+## Webhooks vs WebSocket
+
+| | Webhooks | WebSocket |
+|---|---|---|
+| Where it lands | Your HTTPS endpoint | Browser / app |
+| Reliability | Retried 11× over ~15h, auto-disable on 72h continuous failure | Best-effort while connected |
+| Latency | Seconds (queued) | Sub-second |
+| Idempotency | Built in (`webhook-id` reused) | Reconnect logic on you |
+| Use for | Order state-of-record, accounting | UI updates, progress bars |
+
+Most production setups use both: webhook fires source-of-truth, WS pushes
+the same event for UI snappiness.
+
+
+# WebSocket
+Source: https://skinshark.gg/docs/guides/websocket
+
+Per-sub-user real-time event stream for deposits and trades. Read-only, JWT-ticket authed.
+
+
+The WebSocket endpoint pushes deposit and trade events for one sub-user
+in real time. It's the lowest-latency way to react to status changes and
+the easiest way to drive UI without polling.
+
+```http
+wss://api.skinshark.gg/ws?token=<wsToken>
+```
+
+For server-side durable delivery, use [Webhooks](/guides/webhooks)
+instead — WebSockets close on network blips; webhooks retry.
+
+## Authentication
+
+The WebSocket isn't authenticated by `api-key` (browsers can't send
+custom headers on `WebSocket` upgrades). Instead, mint a short-lived JWT
+ticket through the API, then pass it as a `?token=` query string.
+
+<Steps>
+  <Step title="Mint a ticket">
+    Call `POST /auth/ws-token` with `On-Behalf-Of` set to the sub-user
+    you want to subscribe as. Each ticket is bound to that one sub-user.
+
+    ```ts
+    const { token, expiresIn } = await api<{ token: string; expiresIn: string }>(
+      "/auth/ws-token",
+      { method: "POST" },
+      "user_42",
+    );
+    // token: short-lived JWT, ~1h
+    // expiresIn: "1h"
+    ```
+  </Step>
+  <Step title="Open the socket">
+    The token can ride in either of two slots. The subprotocol form is
+    preferred — the token isn't logged by proxies / browser history /
+    access logs the way query strings are:
+
+    ```ts
+    // Preferred — Sec-WebSocket-Protocol subprotocol
+    const ws = new WebSocket("wss://api.skinshark.gg/ws", [`bearer.${token}`]);
+
+    // Fallback — query string (still supported)
+    const ws = new WebSocket(`wss://api.skinshark.gg/ws?token=${token}`);
+    ```
+
+    The server verifies the ticket on upgrade. Bad token → close code
+    `4001 Invalid token`.
+  </Step>
+  <Step title="Listen for the connected frame">
+    Immediately after upgrade, the server pushes:
+
+    ```json
+    {
+      "event": "connected",
+      "data": { "userId": "<uuid>" },
+      "ts": 1714678920000
+    }
+    ```
+  </Step>
+</Steps>
+
+## Protocol
+
+- **Read-only.** Sending any frame to the server closes the socket with
+  `4002 Read-only`. The protocol carries server pushes only.
+- **Heartbeats.** The server sends WS pings; respond with pongs to keep
+  the connection alive (most clients do this automatically).
+- **Frame shape.** Every push is `{ event, data, ts }` — `event` is a
+  string discriminator, `ts` is Unix epoch milliseconds.
+
+## Events
+
+```ts
+type WsEvent =
+  | { event: "connected"; data: { userId: string }; ts: number }
+  | DepositEvent
+  | TradeEvent
+  | { event: "system.notice"; data: { severity: "info" | "warning" | "critical"; message: string }; ts: number };
+
+type DepositEvent =
+  | { event: "deposit.transfer"; data: { fundingId: string; status: "pending"; transfer: { txHash: string; amount: number; chain: string } }; ts: number }
+  | { event: "deposit.completed"; data: { fundingId?: string; depositId?: string; status: "completed"; payAmountToken?: number; receiveAmountUsd?: number; completedAt: string }; ts: number }
+  | { event: "deposit.failed"; data: { fundingId?: string; depositId?: string; status: string; reason: string }; ts: number }
+  | { event: "deposit.refunded"; data: { fundingId: string; status: "refunded" }; ts: number }
+  | { event: "deposit.pending"; data: { depositId: string; chain: string; token: string; txHash: string; amountWei: string }; ts: number };
+
+type TradeEvent = {
+  event: `trade.${string}`;       // "trade.completed", "trade.failed", "trade.pending", etc.
+  data: Trade;
+  ts: number;
+};
+```
+
+### Discriminating deposits
+
+Gateway-hosted deposits (Gate Pay, on-ramp) and self-hosted EVM crypto
+share event names but carry different keys:
+
+| Event | Gateway | Self-hosted crypto |
+|---|---|---|
+| `deposit.completed` | has `fundingId`, `payAmountToken`, `receiveAmountUsd` | has `depositId`, `chain`, `token`, `txHash`, `amountWei`, `amountUsdCents`, `confirmations` |
+| `deposit.failed` | has `fundingId`, `status`, `reason` | has `depositId`, `chain`, `token`, `txHash`, `reason`, `confirmations` |
+
+```ts
+function isCryptoDeposit(e: { fundingId?: string; depositId?: string }): boolean {
+  return Boolean(e.depositId);
+}
+```
+
+### Trade events
+
+Fired on every status transition. The full trade payload is included so
+you can update your UI without a follow-up GET.
+
+```ts
+ws.addEventListener("message", (raw) => {
+  const event = JSON.parse(raw.data.toString()) as WsEvent;
+  if (event.event.startsWith("trade.")) {
+    const trade = event.data;
+    updateOrderStatus(trade.externalId, trade.status);
+  }
+});
+```
+
+## Close codes
+
+| Code | Reason | Cause |
+|---|---|---|
+| 4001 | Missing token | No `?token=` query string |
+| 4001 | Invalid token | Bad signature, expired, or wrong purpose |
+| 4002 | Read-only | Client sent any frame after upgrade |
+
+## Reconnection
+
+The server doesn't rotate tokens on disconnect; the same ticket is valid
+until it expires (~1h). On disconnect:
+
+```ts
+function connect(token: string): WebSocket {
+  const ws = new WebSocket(`wss://api.skinshark.gg/ws?token=${token}`);
+
+  ws.addEventListener("close", async (e) => {
+    if (e.code === 4001 || e.code === 4002) {
+      // 4001 = bad/expired token; mint a fresh one
+      const fresh = await api<{ token: string }>(
+        "/auth/ws-token",
+        { method: "POST" },
+        subUserId,
+      );
+      setTimeout(() => connect(fresh.token), 1000);
+      return;
+    }
+    // Network blip; reconnect with the same token
+    setTimeout(() => connect(token), Math.min(30000, attempt * 1000));
+  });
+
+  return ws;
+}
+```
+
+## One sub-user per socket
+
+A token is bound to the `On-Behalf-Of` sub-user it was minted with — the
+socket only delivers events for that user. To watch multiple sub-users,
+mint a token per sub-user and open one socket each. There's no
+multi-subscription pattern on a single connection.
+
+For server-side aggregation across many sub-users, prefer
+[Webhooks](/guides/webhooks).
+
+
+# Live market
+Source: https://skinshark.gg/docs/guides/live-market
+
+A REST snapshot plus a WebSocket delta stream of the cheapest current listings, repriced for the viewer.
+
+
+The live market is the set of cheapest current listings across connected
+marketplaces, kept warm and repriced for the viewer. It has two surfaces:
+
+- `GET /market` — a snapshot of the feed, cheapest first.
+- `GET /market/live` — a WebSocket that pushes price deltas in real time.
+
+Use them together: load a snapshot, open the socket, then apply each delta
+on top of the snapshot. Prices on both surfaces already include the
+viewer's fee, so you render them as-is.
+
+## Snapshot
+
+`GET /market` returns the curated feed sorted cheapest first.
+
+```ts
+const { items, total } = await api<{ items: MarketListing[]; total: number }>(
+  "/market?limit=100",
+  { method: "GET" },
+  "user_42",
+);
+```
+
+<ParamField query="page" type="integer" default="1">
+  1-based page number.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Listings per page, 1–500, or `-1` to return the whole feed in one response.
+</ParamField>
+
+Each entry's `price` is a decimal number with the viewer's fee already
+applied, and `id` is the buyable listing id you pass to the trade
+endpoints. See [Data models](/reference/data-models) for the full
+`MarketListing` shape.
+
+## Live stream
+
+```http
+wss://api.skinshark.gg/market/live?scope=watchlist
+```
+
+The socket pushes a delta whenever a listing in scope appears, reprices,
+or is removed. It carries no snapshot of its own — pair it with
+`GET /market` to establish initial state.
+
+### Scopes
+
+<ParamField query="scope" type="string" default="all">
+  `all` or `watchlist`.
+</ParamField>
+
+| Scope | Contents | Payload |
+|---|---|---|
+| `watchlist` | The curated feed `GET /market` returns | Full listing (icon, rarity, reference fields) |
+| `all` | Every listing event across the market (firehose) | Lighter — `type` and `iconUrl` are omitted; high volume |
+
+Pick `watchlist` to track the same set `GET /market` serves. Pick `all`
+only if you want the raw firehose and can absorb the volume.
+
+## Authentication
+
+The live socket uses the same JWT ticket as the [WebSocket](/guides/websocket)
+event stream — the ticket carries a `market` scope alongside `deposit`
+and `trade`, so one ticket works for both sockets.
+
+<Steps>
+  <Step title="Mint a ticket">
+    Call `POST /auth/ws-token` with `On-Behalf-Of` set to the sub-user
+    you're acting as.
+
+    ```ts
+    const { token } = await api<{ token: string; expiresIn: string }>(
+      "/auth/ws-token",
+      { method: "POST" },
+      "user_42",
+    );
+    ```
+  </Step>
+  <Step title="Open the socket">
+    Pass the token as a `bearer.<jwt>` subprotocol (preferred — query
+    strings leak into logs) or as `?token=`:
+
+    ```ts
+    const ws = new WebSocket(
+      "wss://api.skinshark.gg/market/live?scope=watchlist",
+      [`bearer.${token}`],
+    );
+    ```
+  </Step>
+  <Step title="Wait for the ready frame">
+    On a successful upgrade the server sends:
+
+    ```json
+    { "event": "market.ready", "data": { "scope": "watchlist" }, "ts": 1714678920000 }
+    ```
+  </Step>
+</Steps>
+
+## Protocol
+
+- **Read-only.** Sending any frame closes the socket with `4002 Read-only`.
+- **Heartbeats.** The server sends WS pings; reply with pongs (most
+  clients do this automatically).
+- **Frame shape.** Every push is `{ event, data, ts }`, where `ts` is Unix
+  epoch milliseconds.
+
+## Events
+
+```ts
+type LiveEvent =
+  | { event: "market.ready"; data: { scope: "all" | "watchlist" }; ts: number }
+  | { event: "market.new"; data: MarketListing; ts: number }
+  | { event: "market.update"; data: MarketListing; ts: number }
+  | { event: "market.remove"; data: { listingId: string; itemId?: string }; ts: number };
+```
+
+Treat `market.new` and `market.update` identically — upsert the listing
+keyed by `data.id`. On `market.remove`, drop the listing by
+`data.listingId`.
+
+```ts
+const listings = new Map<string, MarketListing>();
+
+ws.addEventListener("message", (raw) => {
+  const evt = JSON.parse(raw.data.toString()) as LiveEvent;
+  switch (evt.event) {
+    case "market.new":
+    case "market.update":
+      listings.set(evt.data.id, evt.data);
+      break;
+    case "market.remove":
+      listings.delete(evt.data.listingId);
+      break;
+  }
+});
+```
+
+## Keeping a view in sync
+
+<Steps>
+  <Step title="Open the socket and buffer">
+    Open `scope=watchlist` and buffer deltas until the snapshot loads, so
+    nothing is lost in the gap.
+  </Step>
+  <Step title="Load the snapshot">
+    Page through `GET /market` into your map keyed by `id`.
+  </Step>
+  <Step title="Apply buffered and live deltas">
+    Replay the buffered deltas, then keep applying new ones. An update for
+    a listing you don't have is just an insert; a remove for one you don't
+    have is a no-op.
+  </Step>
+</Steps>
+
+<Info>
+  Prices are snapshotted at connect time using the acting sub-user's fee
+  tier. A mid-session fee change takes effect on the next reconnect.
+</Info>
+
+## Close codes
+
+| Code | Reason | Cause |
+|---|---|---|
+| 4001 | Missing token | No ticket in the subprotocol or `?token=` |
+| 4001 | Invalid token | Bad signature, expired, or wrong purpose |
+| 4002 | Read-only | Client sent a frame after upgrade |
+| 4003 | Missing market scope | Ticket lacks the `market` scope |
+| 4008 | Too many connections | Over the per-user socket limit |
+
+A sub-user may hold up to 5 concurrent live sockets. For the reconnect
+pattern (mint a fresh ticket on `4001`, back off on network blips), see
+the [WebSocket](/guides/websocket#reconnection) guide.
+
+
+# Data models
+Source: https://skinshark.gg/docs/reference/data-models
+
+TypeScript types for every shape returned by the API. Generated equivalents are available via openapi-typescript or the official SDK.
+
+
+These types mirror the OpenAPI `data` shapes — what's inside `body.data` on a
+successful envelope. Generate them with `openapi-typescript`
+([TypeScript types guide](/guides/sdk)) or import from
+`@skinshark/sdk/types`.
+
+## Enums
+
+```ts
+type Currency = "USD" | "EUR";
+
+type Role = "user" | "merchant" | "admin";
+
+type UserStatus = "active" | "suspended" | "deleted";
+
+type WalletType = "spot" | "earnings";
+
+type WalletStatus = "active" | "suspended" | "closed";
+
+type TradeStatus =
+  | "initiated"
+  | "pending"
+  | "active"
+  | "hold"
+  | "completed"
+  | "failed"
+  | "reverted";
+
+type TradeType = "buy" | "sell";
+
+type RevertedBy = "supplier" | "user";
+
+type DeliveryMode = "standard" | "instant";
+
+type DepositStatus =
+  | "initiated"
+  | "pending"
+  | "completed"
+  | "partial"
+  | "expired"
+  | "cancelled"
+  | "refunded"
+  | "failed";
+
+type DepositMethod = "gatepay" | "onramp" | "crypto";
+
+type DepositCurrency = "USDT" | "USDC" | "DAI" | "BTC" | "ETH" | "SOL";
+
+type OnrampPayCurrency = "USD" | "EUR" | "GBP";
+
+type CryptoEvmChain = "ethereum" | "base" | "arbitrum" | "optimism" | "bsc";
+
+type CryptoNativeToken = "USDT" | "USDC" | "NATIVE";
+
+type TwoFactorMethod = "email" | "totp";
+
+// CS2 community labels keep their natural casing.
+type ItemCategory = "Normal" | "StatTrak" | "Souvenir";
+type DopplerPhase =
+  | "Phase 1"
+  | "Phase 2"
+  | "Phase 3"
+  | "Phase 4"
+  | "Ruby"
+  | "Sapphire"
+  | "Black Pearl"
+  | "Emerald";
+
+type SearchSort = "relevance" | "nameAsc" | "nameDesc" | "priceAsc" | "priceDesc";
+```
+
+## Envelope
+
+```ts
+interface SuccessEnvelope<T> {
+  requestId: string;
+  success: true;
+  data: T;
+}
+
+interface ErrorEnvelope {
+  requestId: string;
+  success: false;
+  error: {
+    code: number;
+    key: string;
+    message: string;
+    meta?: Record<string, unknown>;
+  };
+}
+
+type ApiEnvelope<T> = SuccessEnvelope<T> | ErrorEnvelope;
+```
+
+## Merchant context
+
+```ts
+interface MerchantProfile {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  country: string | null;
+  roles: Role[];
+  twoFactorEnabled: boolean;
+  twoFactorMethod: TwoFactorMethod | null;
+  feeBps: number;             // house fee on merchant's own buys
+  merchantFeeBps: number;     // merchant's cut on sub-user trades
+  childDefaultFeeBps: number | null;
+  wallets: {
+    spot: { currency: string; balance: number } | null;
+    earnings: { currency: string; balance: number } | null;
+  };
+  createdAt: string;
+}
+
+interface FeesResponse {
+  merchantFeeBps: number;
+  childDefaultFeeBps: number | null;
+  globalDefaultFeeBps: number;
+  effectiveChildFeeBps: number;
+}
+
+interface MerchantStats {
+  totals: {
+    tradeCount: number;
+    gmv: number;
+    gmvCents: number;            // exact integer cents
+    feesEarnedCents: number;
+    feesEarned: number;
+    spotBalance: number;
+    earningsBalance: number;
+    currency: Currency | null;
+  };
+  bySubUser: Array<{
+    subUserId: string;
+    email: string | null;
+    externalId: string | null;
+    tradeCount: number;
+    gmvCents: number;
+    gmv: number;
+    balance: number;
+    feesContributedCents: number;
+  }>;
+  byStatus: Partial<Record<TradeStatus, number>>;
+}
+
+interface MerchantWallet {
+  walletId: string;
+  type: WalletType;
+  currency: Currency;
+  balance: number;
+}
+```
+
+## Sub-users
+
+```ts
+interface SubUserListItem {
+  id: string;
+  email: string | null;
+  steamId: string | null;
+  externalId: string | null;
+  status: UserStatus;
+  feeBps: number | null;
+  currency: Currency | null;
+  balance: number;
+  createdAt: string;
+}
+
+interface SubUserListResponse {
+  items: SubUserListItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+interface CreateSubUserBody {
+  email?: string;
+  steamId?: string;            // SteamID64
+  externalId?: string;         // also acts as the idempotency key for create
+  currency?: Currency;
+}
+
+interface CreateSubUserResponse {
+  id: string;
+  email: string | null;
+  steamId: string | null;
+  externalId: string | null;
+  status: UserStatus;
+  feeBps: number | null;
+  createdAt: string;
+  currency: Currency;
+  /** True when the response replays a prior create with the same externalId. */
+  idempotent: boolean;
+}
+
+interface SubUserResponse {
+  id: string;
+  email: string | null;
+  steamId: string | null;
+  externalId: string | null;
+  status: UserStatus;
+  feeBps: number | null;
+  createdAt: string;
+  wallet: {                    // single object — sub-users only have one wallet
+    type: WalletType;
+    status: WalletStatus;
+    currency: Currency | null;
+    balance: number;
+  } | null;
+}
+
+interface FundBody {
+  amount: string;              // decimal, e.g. "25.00"
+}
+
+interface FundResponse {
+  transactionId: string;
+  idempotent: boolean;
+}
+```
+
+## Wallet & ledger
+
+```ts
+interface WalletBalance {
+  currency: Currency;
+  balance: number;
+}
+
+interface TransactionItem {
+  id: string;
+  type: string;                // "deposit_credit" | "trade_payment" | ...
+  description: string;
+  status: "posted" | "reversed";
+  amount: number;              // signed: + = credit, − = debit
+  occurredAt: string;
+  externalRef: string | null;
+}
+
+interface TransactionHistory {
+  items: TransactionItem[];    // /user/wallet/ledger, /merchant/ledger
+  nextCursor: string | null;
+}
+```
+
+## Trades
+
+```ts
+interface TradeItem {
+  id: string;
+  name: string | null;
+  marketHashName: string | null;
+  type: string | null;
+  iconUrl: string | null;
+  price: number;
+  exterior?: string;
+  rarity?: string;
+  color?: string;
+  phase?: string;
+  wear?: string;
+  paintSeed?: number;
+  stickers?: Array<{
+    name: string;
+    slot: number;
+    wear: number;
+    iconUrl: string;
+  }>;
+  charm?: { name: string; pattern?: string; iconUrl: string };
+  delivery?: string;
+  status: TradeStatus;
+  tradable: boolean;
+  error?: string;
+}
+
+interface Trade {
+  id: string;
+  type: TradeType;
+  userId: string;
+  steamId: string;
+  tradeUrl: string;
+  offerId?: string;
+  externalId?: string;
+  status: TradeStatus;
+  game: string;                // "730"
+  items: TradeItem[];
+  summary: { total: number; completed: number; failed: number };
+  totalPrice: number;
+  currency: Currency;
+  holdEndDate?: string;
+  settledAt?: string;
+  revertedBy?: RevertedBy;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// /merchant/trades, /merchant/users/{id}/trades, /market/transactions
+interface TradeListResponse {
+  items: Trade[];
+  nextCursor: string | null;
+}
+
+interface BuyItem {
+  listingId: string;
+  maxPrice: string;            // decimal string
+}
+
+interface BuyBody {
+  items: BuyItem[];            // 1–10
+  tradeUrl?: string;
+  externalId?: string;         // your correlation id; replays return the same Trade
+}
+
+interface BuyResponse {
+  id: string;
+  status: TradeStatus;         // "initiated" right after buy
+  itemCount: number;
+  totalPrice: number;
+  createdAt: string;
+}
+
+interface QuickBuyBody {
+  itemId: string;
+  maxPrice: string;
+  amount: number;              // 1–200
+  delivery: DeliveryMode;
+  tradeUrl?: string;
+  externalId?: string;
+}
+
+interface QuickBuyResponse {
+  id: string;
+  status: TradeStatus;
+  requestedCount: number;
+  itemCount: number;
+  totalPrice: number;
+  createdAt: string;
+}
+
+interface CancelItemResponse {
+  ok: true;
+  itemId: string;
+  status: "cancelled" | "failed";
+}
+```
+
+## Catalog & listings
+
+```ts
+interface SuggestionItem {
+  id: string;
+  marketHashName: string;
+  iconUrl: string;
+  rarity?: string;
+  rarityColor?: string;
+  itemType?: string;
+}
+
+interface SearchResultItem {
+  id: string;
+  name: string;
+  marketHashName: string;
+  itemType?: string;
+  iconUrl?: string;
+  weapon?: string;
+  wear?: string;
+  rarity?: string;
+  rarityColor?: string;
+  category?: ItemCategory;
+  collection?: string;
+  floatRange?: [number, number];
+  // Both fee-applied. standard = overall lowest (manual); instant = auto-deliver
+  // floor (C5 today), null when none. Omitted when no market price.
+  price?: { standard: number; instant: number | null };
+  listingsCount?: number;
+  steamPrice?: number;
+}
+
+interface SearchResponse {
+  items: SearchResultItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+interface MarketListing {
+  id: string;
+  marketHashName: string;
+  name: string;
+  type: string;
+  iconUrl: string;
+  price: number;
+  referencePrice?: number;
+  exterior?: string;
+  rarity?: string;
+  collection?: string;
+  color?: string;
+  wear?: number | null;
+  paintSeed?: number | null;
+  doppler?: { status: number; name: string; paintIndex?: number };
+  fade?: { percentage: number };
+  hardened?: { status: number; name: string };
+  stickers?: Array<{
+    name: string;
+    marketHashName?: string;
+    slot: number;
+    wear?: number;
+    iconUrl: string;
+  }>;
+  charm?: {
+    name: string;
+    marketHashName?: string;
+    pattern?: string;
+    iconUrl: string;
+  };
+  inspectUrl?: string;
+  delivery?: string;
+}
+
+// /market/items/{itemId}/listings
+interface ListingsResponse {
+  items: MarketListing[];
+  total: number;
+}
+
+// /market/listings/{listingId} — bare resource, no wrapper
+type ListingDetail = MarketListing;
+```
+
+## Deposits
+
+```ts
+// Gate Pay
+interface DepositChainsResponse {
+  currencies: Array<{
+    currency: DepositCurrency;
+    chains: string[];
+    isStable: boolean;
+    minDepositUsd: number;
+  }>;
+}
+
+interface DepositQuoteBody {
+  currency: DepositCurrency;
+  amount: string;              // decimal USD
+}
+
+interface DepositQuoteResponse {
+  token: DepositCurrency;
+  currency: Currency;
+  payAmountToken: number;
+  receiveAmountUsd: number;
+  receiveAmount: number;
+  fee: number;
+  exchangeRate: number;
+  quoteToken: string;
+  expiresIn: string;           // "5m"
+}
+
+interface CreateDepositBody {
+  quoteToken: string;
+  chain: string;
+}
+
+interface CreateDepositResponse {
+  fundingId: string;
+  status: DepositStatus;
+  currency: Currency;
+  payAmountToken: number;
+  receiveAmountUsd: number;
+  receiveAmount: number;
+  exchangeRate: number;
+  fee: number;
+  expireTime: number | null;
+  whitelabelUrl: string | null;
+  onChain: { network: string; token: DepositCurrency; address: string };
+}
+
+// On-ramp (card)
+interface OnrampQuoteBody {
+  payAmount?: number;
+  receiveAmount?: number;
+  payCurrency: OnrampPayCurrency;
+}
+
+interface OnrampSessionResponse {
+  fundingId: string;
+  status: "initiated" | "completed" | "failed";
+  currency: Currency;
+  payAmount: number;
+  receiveAmount: number;
+  receiveAmountUsd: number;
+  payCurrency: OnrampPayCurrency;
+  exchangeRate: number;
+  whitelabelUrl: string;
+}
+
+// Self-hosted EVM crypto
+interface CryptoAddressResponse {
+  address: string;             // 0x...
+  chains: CryptoEvmChain[];
+  tokens: CryptoNativeToken[];
+}
+
+interface CryptoQuoteBody {
+  token: "USDT" | "USDC";
+  amount: number;              // ≤ 10,000,000
+}
+
+interface CryptoQuoteResponse {
+  token: string;
+  amount: number;
+  walletCurrency: Currency;
+  exchangeRate: number;
+  feeBps: number;
+  chains: Record<CryptoEvmChain, {
+    feeCents: number;
+    receiveAmountUsd: number;
+    receiveAmount: number;
+    gasGwei: number;
+  }>;
+}
+
+interface CancelDepositResponse {
+  depositId: string;
+  status: DepositStatus;
+}
+
+interface ResumeDepositResponse {
+  fundingId: string;
+  status: DepositStatus;
+  method: DepositMethod;
+  currency: Currency;
+  amount: number;
+  whitelabelUrl: string | null;
+  onChain: { network: string; token: string; address: string } | null;
+}
+```
+
+## Partner crypto payout custody
+
+```ts
+type PayoutCryptoToken = "USDT" | "USDC";
+
+type PayoutWithdrawalStatus =
+  | "pending_callback"
+  | "queued"
+  | "broadcast"
+  | "confirmed"
+  | "failed"
+  | "refunded";
+
+// GET /user/wallet/payout/crypto/address — distinct from /deposit/crypto/address.
+interface PayoutCryptoAddressResponse {
+  address: string;                  // 0x...
+  chains: CryptoEvmChain[];
+  tokens: PayoutCryptoToken[];
+}
+
+// One row per (chain, tokenAddress). Each row is an independent withdrawable bucket.
+// No cross-chain liquidity — funds on chain X can only be withdrawn on chain X.
+interface PayoutCryptoBalance {
+  chain: string;                    // ethereum | base | arbitrum | optimism | bsc
+  token: string;                    // USDT | USDC
+  tokenAddress: string;             // ERC-20 contract on this chain (lowercased)
+  balanceCents: string;             // USD cents, bigint as decimal string
+}
+
+interface PayoutBalancesResponse {
+  balances: PayoutCryptoBalance[];
+}
+
+interface PayoutQuoteBody {
+  chain: CryptoEvmChain;
+  token: PayoutCryptoToken;
+  amountCents: string;              // bigint as decimal string
+}
+
+// All fees pre-multiplied by the configured payout fee multiplier (default 1.5).
+// L2 chains (Base, Arbitrum, Optimism) return all-"0" stats.
+interface PayoutQuoteStats24h {
+  minFeeUsdCents: string;
+  p25FeeUsdCents: string;
+  avgFeeUsdCents: string;
+  p75FeeUsdCents: string;
+  maxFeeUsdCents: string;
+}
+
+interface PayoutQuoteResponse {
+  chain: string;
+  token: string;
+  amountCents: string;
+  liveFeeUsdCents: string;          // live network gas; "0" on L2 chains
+  liveTotalDebitCents: string;      // amountCents + liveFeeUsdCents
+  stats24h: PayoutQuoteStats24h;
+  computedAt: string;               // ISO-8601
+}
+
+interface PayoutWithdrawBody {
+  chain: CryptoEvmChain;
+  token: PayoutCryptoToken;
+  destination: string;              // 0x...
+  amountCents: string;              // bigint USD cents
+  externalId: string;               // your idempotency key, unique per merchant
+  forSubUser?: string;              // sub-user UUID OR your externalId for them; label only
+  maxFeeUsdCents?: string;          // optional cap; fee > cap ⇒ 1821 (no state change)
+}
+
+interface PayoutWithdrawResponse {
+  id: string;
+  status: PayoutWithdrawalStatus;   // "pending_callback" on success
+  chain: string;
+  token: string;
+  destination: string;
+  amountCents: string;
+  feeCents: string;
+  externalId: string;
+  forUserId: string | null;
+  forUserExternalId: string | null;
+  createdAt: string;
+}
+
+interface PayoutWithdrawal {
+  id: string;
+  status: PayoutWithdrawalStatus;
+  chain: string | null;
+  token: string | null;
+  tokenAddress: string | null;
+  destination: string | null;
+  amountCents: string;
+  feeCents: string;
+  txHash: string | null;
+  failureReason: string | null;
+  externalId: string | null;
+  forUserId: string | null;
+  forUserExternalId: string | null;
+  callbackAttempts: number;
+  createdAt: string;
+  broadcastAt: string | null;
+  confirmedAt: string | null;
+}
+
+interface PayoutWithdrawalListResponse {
+  items: PayoutWithdrawal[];
+  nextCursor: string | null;
+}
+```
+
+## Sub-user profile & trade URLs
+
+```ts
+interface UserProfile {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  country: string | null;
+  roles: Role[];
+  twoFactorEnabled: boolean;
+  twoFactorMethod: TwoFactorMethod | null;
+  steam: {
+    steamId: string;
+    personaName: string | null;
+    avatarUrl: string | null;
+    profileUrl: string | null;
+    tradeUrl: string;
+  } | null;
+  discord: {
+    discordId: string;
+    username: string;
+    avatar: string | null;
+  } | null;
+  wallet: { currency: Currency; balance: number } | null;
+  createdAt: string;
+}
+
+interface TradeUrlResponse {
+  id: string;
+  url: string;
+  steamId: string;
+  personaName: string | null;
+  avatarUrl: string | null;
+  profileUrl: string | null;
+  isPrimary: boolean;
+  createdAt: string;
+}
+```
+
+## WebSocket events
+
+```ts
+interface WsConnectedEvent {
+  event: "connected";
+  data: { userId: string };
+  ts: number;
+}
+
+interface WsTradeUpdateEvent {
+  event: `trade.${string}`;
+  data: Trade;
+  ts: number;
+}
+
+interface WsSystemNoticeEvent {
+  event: "system.notice";
+  data: { severity: "info" | "warning" | "critical"; message: string };
+  ts: number;
+}
+
+type WsEvent =
+  | WsConnectedEvent
+  | WsTradeUpdateEvent
+  | WsSystemNoticeEvent
+  // … plus deposit variants documented in /guides/websocket
+  ;
+```
+
+For exhaustive type coverage, generate types from the OpenAPI spec or use the
+`@skinshark/sdk/types` subpath — that's the canonical source.
+
+
+# Errors
+Source: https://skinshark.gg/docs/reference/errors
+
+Full error table — code, key, HTTP status, and meaning. Branch on `key`, never on `message`.
+
+
+Every error response carries a numeric `code` and a stable string `key`.
+`message` is human-readable and may change; **always branch on `key`**.
+
+```ts
+{
+  "requestId": "01900b...",
+  "success": false,
+  "error": { "code": 1500, "key": "INSUFFICIENT_BALANCE", "message": "..." }
+}
+```
+
+See [Error handling](/guides/error-handling) for retry strategy.
+
+## Code blocks
+
+Codes are organized into 100-block ranges by domain, with sub-groups every
+10 codes inside a domain.
+
+| Range | Domain |
+|---|---|
+| 1000–1099 | General / Infrastructure |
+| 1100–1199 | Auth |
+| 1200–1299 | 2FA |
+| 1300–1399 | Account access |
+| 1400–1499 | User Settings |
+| 1500–1599 | Wallet |
+| 1600–1699 | Deposits (gateway: gatepay, onramp) |
+| 1700–1799 | Withdrawals (reserved) |
+| 1800–1899 | Crypto Deposits / Withdrawals |
+| 1900–1999 | Merchant Management |
+| 2000–2099 | Marketplace |
+
+## HTTP status mapping
+
+| Status | When |
+|---|---|
+| `400` | Generic bad request (`BAD_REQUEST`). |
+| `401` | Missing or invalid auth, including expired tokens. |
+| `403` | Authenticated but not permitted (suspended, IP not allowed, calling a dashboard-only route). |
+| `404` | Resource doesn't exist. |
+| `409` | Resource conflict (idempotency replay, duplicate email, etc.). |
+| `410` | Gone (a one-shot 2FA code was already used). |
+| `422` | Validation or business-rule failure. |
+| `429` | Rate limited. |
+| `500` | Internal error. |
+| `502` | Upstream gateway error (Discord OAuth, marketplace partner, crypto RPC). |
+| `503` | Service unavailable (no marketplace workers healthy, FX unavailable, maintenance). |
+| `504` | Marketplace worker did not respond in time. |
+
+## General / Infrastructure (1001–1007)
+
+Cross-cutting errors that any endpoint can return.
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1001 | `VALIDATION_FAILED` | 422 | Request body / query failed Zod schema validation. The error includes `meta.details`. |
+| 1002 | `BAD_REQUEST` | 400 | Generic malformed request (e.g. unknown query combo). |
+| 1003 | `NOT_FOUND` | 404 | Generic resource not found. |
+| 1004 | `CONFLICT` | 409 | Generic uniqueness violation. |
+| 1005 | `RATE_LIMITED` | 429 | Honor `Retry-After`. See [Rate limits](/reference/rate-limits). |
+| 1006 | `INTERNAL` | 500 | Catch-all server error. Retry. |
+| 1007 | `MAINTENANCE_MODE` | 503 | Service down for maintenance. |
+
+## Auth (1100–1107)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1100 | `UNAUTHORIZED` | 401 | No credentials. |
+| 1101 | `INVALID_CREDENTIALS` | 401 | (Dashboard JWT) bad email/password. |
+| 1102 | `INVALID_TOKEN` | 401 | (Dashboard JWT) bad signature, expired, or wrong purpose. |
+| 1103 | `MISSING_BEARER` | 401 | (Dashboard) no `Authorization: Bearer` header. |
+| 1104 | `MISSING_API_KEY` | 401 | No `api-key` header. |
+| 1105 | `INVALID_API_KEY` | 401 | Key not found. |
+| 1106 | `API_KEY_REVOKED` | 401 | Key was revoked in dashboard. |
+| 1107 | `INVALID_REFRESH_TOKEN` | 401 | (Dashboard) refresh token bad/expired. |
+
+## 2FA (1200–1208)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1200 | `TWOFA_REQUIRED` | 401 | Login requires 2FA challenge completion. |
+| 1201 | `INVALID_2FA_CODE` | 422 | Bad TOTP / email / recovery code. |
+| 1202 | `TWOFA_ALREADY_ENABLED` | 409 | Cannot start TOTP setup; already enabled. |
+| 1203 | `TWOFA_NOT_ENABLED` | 422 | Operation requires 2FA, which isn't on. |
+| 1204 | `TWOFA_NOT_STARTED` | 422 | TOTP setup not in progress. |
+| 1205 | `TWOFA_USE_TOTP` | 422 | Email channel offered but account uses TOTP. |
+| 1206 | `TWOFA_USE_EMAIL` | 422 | TOTP channel offered but account uses email. |
+| 1207 | `TWOFA_CODE_USED` | 410 | Recovery code already consumed. |
+| 1208 | `TWOFA_PROVIDE_CODE` | 422 | Provide a TOTP or recovery code. |
+
+## Account access (1300–1311)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1300 | `FORBIDDEN` | 403 | Authenticated but not permitted. Most common: API-key calling a dashboard-only route, or `On-Behalf-Of` set on `/merchant/*`. |
+| 1301 | `ACCOUNT_SUSPENDED` | 403 | Merchant or sub-user account suspended. |
+| 1302 | `ACCOUNT_DELETED` | 403 | Account is soft-deleted. |
+| 1303 | `ACCOUNT_LOCKED` | 403 | Temporarily locked (e.g. failed login bursts). |
+| 1304 | `EMAIL_NOT_VERIFIED` | 403 | Operation requires a verified email. |
+| 1305 | `API_KEY_IP_DENIED` | 403 | Source IP not on the key's allowlist. |
+| 1306 | `USER_NOT_OWNED` | 403 | Acting on a user that doesn't belong to your merchant. |
+| 1307 | `USER_NOT_FOUND` | 404 | Sub-user not owned by this merchant (or doesn't exist — same response, no enumeration). |
+| 1308 | `INVALID_INVITE` | 422 | Invite token bad/expired. |
+| 1309 | `INVITE_EMAIL_MISMATCH` | 422 | Invite is for a different email. |
+| 1310 | `INVALID_VERIFICATION` | 422 | Email-verification code bad/expired. |
+| 1311 | `CAPTCHA_FAILED` | 403 | CAPTCHA verification failed. |
+
+## User Settings (1400–1422)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1400 | `WRONG_PASSWORD` | 422 | Current password incorrect. |
+| 1401 | `NO_PASSWORD_SET` | 422 | Account has no password (OAuth-only). |
+| 1402 | `SAME_EMAIL` | 422 | New email matches current. |
+| 1403 | `RESTORE_INVALID` | 422 | Invalid/expired restore token. |
+| 1404 | `RESET_INVALID` | 422 | Invalid/expired password reset token. |
+| 1405 | `ACCOUNT_NOT_DELETED` | 422 | Restore called on a non-deleted account. |
+| 1410 | `TRADEURL_LIMIT` | 422 | Maximum number of saved trade URLs reached. |
+| 1411 | `TRADEURL_ALREADY_ADDED` | 409 | Trade URL already saved. |
+| 1412 | `TRADEURL_NOT_FOUND` | 404 | Trade URL ID doesn't exist. |
+| 1413 | `TRADEURL_INVALID_TOKEN` | 422 | Trade URL invalid, expired, or inventory private. |
+| 1414 | `TRADEURL_ESCROW` | 422 | Account has trade hold (escrow) enabled. |
+| 1420 | `DISCORD_ALREADY_LINKED` | 409 | Account already linked to a Discord. |
+| 1421 | `DISCORD_NOT_LINKED` | 422 | Unlink called on an unlinked account. |
+| 1422 | `DISCORD_OAUTH_FAILED` | 502 | Discord OAuth handshake failed. |
+
+## Wallet (1500–1522)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1500 | `INSUFFICIENT_BALANCE` | 422 | Wallet balance < required. |
+| 1501 | `WALLET_SUSPENDED` | 403 | Wallet is suspended (e.g. ledger drift). |
+| 1502 | `WALLET_NOT_FOUND` | 404 | Wallet doesn't exist for that user/type. |
+| 1503 | `INVALID_CURRENCY` | 422 | Currency value outside the supported set. |
+| 1504 | `INVALID_AMOUNT` | 422 | Amount ≤ 0 or wrong format. |
+| 1510 | `IDEMPOTENCY_CONFLICT` | 409 | Same `Idempotency-Key`, different request body. |
+| 1511 | `IDEMPOTENCY_KEY_REQUIRED` | 422 | `Idempotency-Key` header missing on `/fund`. |
+| 1520 | `TRANSFER_CURRENCY_MISMATCH` | 422 | Source and destination wallets in different currencies. |
+| 1521 | `MERCHANT_MUST_BE_USD` | 422 | Merchant accounts must use USD. |
+| 1522 | `FX_RATE_UNAVAILABLE` | 503 | FX rate unavailable — retry shortly. |
+
+## Deposits — gateway (1600–1608)
+
+`gatepay` and `onramp` deposits.
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1600 | `DEPOSIT_NOT_FOUND` | 404 | Unknown deposit ID. |
+| 1601 | `DEPOSIT_NOT_CANCELLABLE` | 422 | Only `initiated` deposits can be cancelled. |
+| 1602 | `DEPOSIT_NOT_RESUMABLE` | 422 | Deposit reached a terminal state. |
+| 1603 | `INVALID_QUOTE` | 422 | Quote token bad or expired. Re-quote. |
+| 1604 | `INVALID_CHAIN` | 422 | Unsupported chain for this currency. |
+| 1605 | `INVALID_DEPOSIT_CURRENCY` | 422 | Unsupported deposit currency. |
+| 1606 | `DEPOSIT_MIN_AMOUNT` | 422 | Below provider minimum. |
+| 1607 | `INVALID_SIGNATURE` | 401 | Gateway callback signature failed. |
+| 1608 | `GATEWAY_ERROR` | 502 | Payment gateway returned an error. |
+
+## Crypto deposits / withdrawals (1800–1811)
+
+Self-hosted EVM deposit/withdrawal/transfer.
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1800 | `CRYPTO_NOT_CONFIGURED` | 503 | Crypto gateway not configured. |
+| 1801 | `CRYPTO_CHAIN_NOT_SUPPORTED` | 422 | Chain not enabled. |
+| 1802 | `CRYPTO_CHAIN_PAUSED` | 503 | Admin paused the chain. |
+| 1803 | `CRYPTO_TOKEN_NOT_SUPPORTED` | 422 | Token not enabled on this chain. |
+| 1804 | `CRYPTO_ADDRESS_NOT_FOUND` | 404 | No deposit address generated for user yet. |
+| 1805 | `CRYPTO_MIN_AMOUNT` | 422 | Below minimum. |
+| 1806 | `CRYPTO_INVALID_DESTINATION` | 422 | Destination address invalid. |
+| 1807 | `CRYPTO_WITHDRAWAL_NOT_FOUND` | 404 | Withdrawal not found. |
+| 1808 | `CRYPTO_WITHDRAWAL_INVALID_STATE` | 422 | Withdrawal not in a valid state for this action. |
+| 1809 | `CRYPTO_WEBHOOK_INVALID` | 401 | Webhook signature bad. |
+| 1810 | `CRYPTO_SELF_TRANSFER` | 422 | Cannot transfer to your own wallet. |
+| 1811 | `CRYPTO_RECIPIENT_WALLET_MISSING` | 422 | Recipient has no wallet for this currency. |
+
+## Partner crypto payout custody (1820–1827)
+
+| Code | Key | HTTP | Notes |
+|---|---|---|---|
+| 1820 | `CRYPTO_PAYOUT_NOT_ENABLED` | 403 | Merchant does not have `cryptoPayoutEnabled=true`. Admin-controlled toggle. |
+| 1821 | `CRYPTO_PAYOUT_FEE_EXCEEDS_MAX` | 422 | Live fee at submission exceeds the merchant-supplied `maxFeeUsdCents`. No state mutated. |
+| 1822 | `CRYPTO_PAYOUT_INSUFFICIENT_BALANCE` | 422 | Per-(chain, token) sidecar balance is below `amountCents + fee`. Each chain × token is an independent bucket — no cross-chain liquidity. |
+| 1823 | `CRYPTO_PAYOUT_NO_CALLBACK_URL` | 422 | No active `CallbackUrl` registered for the merchant. Approval callbacks need somewhere to land before any withdrawal can proceed. |
+| 1824 | `CRYPTO_PAYOUT_DUPLICATE_EXTERNAL_ID` | 409 | Only on a **genuine concurrent duplicate** racing the first create. A normal retry of the same `externalId` returns the original withdrawal (idempotent replay), not this error. |
+| 1825 | `CRYPTO_PAYOUT_INVALID_SUBUSER` | 422 | `forSubUser` doesn't resolve to a sub-user owned by the calling merchant. The value can be the sub-user's UUID or your `externalId`, but only within your own children. |
+| 1826 | `CRYPTO_PAYOUT_FEE_UNAVAILABLE` | 503 | The gas/price oracle is temporarily down on a fee chain. Fail-closed — retry shortly. |
+| 1827 | `CRYPTO_PAYOUT_NO_SIGNING_KEY` | 422 | A webhook signing secret must be provisioned before requesting payouts, so the approval call can be signed. |
+
+## Merchant management (1900–1950)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 1900 | `INVALID_ADMIN_OP` | 422 | Invalid admin/merchant operation. |
+| 1910 | `APIKEY_LIMIT_REACHED` | 422 | Maximum active API keys reached. |
+| 1911 | `APIKEY_ALREADY_REVOKED` | 422 | API key already revoked. |
+| 1920 | `SECRET_ALREADY_EXISTS` | 409 | Active webhook secret already exists. |
+| 1921 | `SECRET_NOT_FOUND` | 404 | Webhook secret not found. |
+| 1922 | `SECRET_ALREADY_REVOKED` | 422 | Webhook secret already revoked. |
+| 1930 | `WEBHOOK_TEST_FAILED` | 422 | Test ping didn't return 2xx. |
+| 1931 | `WEBHOOK_NOT_FOUND` | 404 | No active callback URL configured (or revoked / disabled). |
+| 1932 | `WEBHOOK_DELIVERY_NOT_FOUND` | 404 | Delivery ID not yours / doesn't exist. |
+| 1933 | `WEBHOOK_URL_INVALID` | 422 | URL fails SSRF / scheme checks. |
+| 1940 | `EMAIL_TAKEN` | 409 | Sub-user creation: email already registered. |
+| 1941 | `STEAM_ID_TAKEN` | 409 | Sub-user creation: Steam account already registered. |
+| 1942 | `EXTERNAL_ID_TAKEN` | 409 | Sub-user creation: `externalId` already taken by a different sub-user. |
+| 1943 | `SUB_USER_HAS_BALANCE` | 422 | Can't delete: balance is non-zero. |
+| 1950 | `INVALID_FEE_BPS` | 422 | `feeBps` out of range (0–5000). |
+
+## Marketplace (2000–2041)
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 2000 | `MARKET_UNAVAILABLE` | 503 | No marketplace workers healthy. Retry once after 30s. |
+| 2001 | `MARKET_TIMEOUT` | 504 | Marketplace worker did not respond in time. |
+| 2002 | `WORKER_LOW_BALANCE` | 503 | Marketplace worker has insufficient balance to settle. |
+| 2010 | `ORDER_NOT_FOUND` | 404 | Trade ID or external ID doesn't exist in your scope. |
+| 2011 | `LISTING_NOT_FOUND` | 404 | Listing sold / removed since you fetched it. |
+| 2012 | `LISTING_DETAIL_FAILED` | 502 | Failed to fetch listing details from upstream. |
+| 2020 | `PRICE_MISMATCH` | 409 | Listing price drifted above your `maxPrice`. |
+| 2021 | `PRICE_BELOW_MINIMUM` | 422 | Quick-buy `maxPrice` below current minimum listing price. |
+| 2022 | `TRADEURL_REQUIRED` | 422 | Sub-user has no primary Steam trade URL set. |
+| 2030 | `PURCHASE_FAILED` | 502 | Marketplace partner rejected the purchase. |
+| 2031 | `PURCHASE_RETRY_TIMEOUT` | 504 | Purchase retried but never settled. |
+| 2032 | `CALLBACK_INVALID` | 401 | Marketplace callback signature failed. |
+| 2040 | `TRADE_NOT_CANCELLABLE` | 409 | Trade not in a cancellable state. |
+| 2041 | `TRADE_CANCEL_TOO_SOON` | 422 | Order must be at least 30 minutes old to cancel. |
+
+## Validation error shape
+
+When `key === "VALIDATION_FAILED"`, the error includes per-field details:
+
+```json
+{
+  "requestId": "01900b...",
+  "success": false,
+  "error": {
+    "code": 1001,
+    "key": "VALIDATION_FAILED",
+    "message": "Validation failed",
+    "meta": {
+      "details": [
+        { "path": ["amount"], "message": "Invalid decimal amount" },
+        { "path": ["items", 0, "maxPrice"], "message": "String must contain at most 2 decimal places" }
+      ]
+    }
+  }
+}
+```
+
+
+# Rate limits
+Source: https://skinshark.gg/docs/reference/rate-limits
+
+Tier-based aggregate budget, per-route caps, and how to back off cleanly.
+
+
+The platform enforces two complementary limits on every authenticated
+request:
+
+1. **Aggregate tier budget** — a per-merchant token bucket sized by your
+   plan. Every request consumes at least one token; expensive endpoints
+   consume more.
+2. **Per-route caps** — tight per-key (or per-IP for unauth flows)
+   limits on specific sensitive routes, layered on top of the budget.
+
+Both must permit the request; if either is exhausted you get `429`.
+
+## Aggregate tier budget
+
+Tokens refill on a sliding 60-second window. Sub-users share the
+merchant's bucket — sub-user count never multiplies your budget.
+
+| Tier | Tokens / minute |
+|---|---|
+| `standard` | 60 |
+| `premium` | 180 |
+| `enterprise` | 360 |
+
+Each request deducts from the bucket according to its cost class:
+
+| Class | Cost | Endpoints |
+|---|---|---|
+| Cheap | 1 | All routes by default — reads, profile, settings, normal writes, sub-user CRUD, etc. |
+| Expensive | 5 | The five worker-fanout / external-API endpoints listed below. |
+
+The expensive endpoints — these dispatch to marketplace workers or hit
+external-marketplace APIs, so each call costs 5 tokens against your
+tier budget:
+
+| Method | Path |
+|---|---|
+| `GET` | `/market/items/{itemId}/listings` |
+| `GET` | `/market/listings/{listingId}` |
+| `POST` | `/market/buy` |
+| `POST` | `/market/buy/quick` |
+| `POST` | `/market/transactions/{tradeId}/items/{itemId}/cancel` |
+
+So a `standard` merchant (60 tokens / minute) can burn the whole budget
+on 60 cheap calls or 12 expensive ones, or any mix in between. A
+`premium` merchant gets 36 expensive calls; `enterprise` gets 72.
+Need more? Upgrade tier or contact support.
+
+## Per-route caps
+
+Independent of the tier budget, these tighter limits apply on specific
+endpoints. They use their own counters — exhausting one doesn't affect
+the others or the tier budget.
+
+### Sensitive merchant operations (per-merchant key)
+
+| Endpoint group | Window | Limit |
+|---|---|---|
+| API key create / revoke / rotate / IP-allowlist | 5 min | 5 |
+| Webhook secret create / rotate / revoke | 5 min | 5 |
+| Webhook URL set / test / revoke | 5 min | 10 |
+| Account settings (password, email change, delete) | 5 min | 5 / 10 |
+| Webhook event filter | 5 min | 20 |
+| Sub-user delete | 5 min | 20 |
+| Fee setting writes | 5 min | 20 |
+
+### Normal writes (per-merchant key)
+
+`POST /merchant/users` (create), `POST /merchant/users/{id}/fund`,
+`POST /merchant/users/{id}/suspend|reactivate`, trade URL CRUD,
+API key name update.
+
+| Window | Limit |
+|---|---|
+| 1 min | 30 |
+
+### Public auth flow (per-IP)
+
+Login, register, refresh, password reset, email/2FA challenge, Discord
+OAuth start. Tighter per-IP caps to slow brute-force.
+
+| Endpoint group | Window | Limit |
+|---|---|---|
+| Login / Discord connect | 1 min | 10 |
+| Register | 1 min | 5 |
+| Verify (2FA, email) | 1 min | 5 |
+| Resend (email codes) | 1 min | 3 |
+| Password reset request | 1 hour | 3 |
+| Password reset confirm | 15 min | 5 |
+| Refresh access token | 1 min | 30 |
+
+### Webhooks (per-IP)
+
+Inbound provider webhooks (gatepay, onramp, crypto, marketplace
+callbacks): 60/min per source IP.
+
+## Response headers
+
+For routes covered by a per-route cap, the standard rate-limit headers
+are returned on every response:
+
+| Header | Meaning |
+|---|---|
+| `x-ratelimit-limit` | Cap for this route. |
+| `x-ratelimit-remaining` | Calls left in the current window. |
+| `x-ratelimit-reset` | Epoch seconds at which the window resets. |
+
+The aggregate tier budget does **not** emit per-request headers — it
+only signals on rejection, via:
+
+| Header | When | Meaning |
+|---|---|---|
+| `retry-after` | `429` only | Seconds until the bucket has room again. |
+
+The `429` body is the standard envelope:
+
+```json
+{
+  "requestId": "01900b...",
+  "success": false,
+  "error": {
+    "code": 1005,
+    "key": "RATE_LIMITED",
+    "message": "Too many requests"
+  }
+}
+```
+
+## Backing off
+
+Honour `retry-after` when present, otherwise use exponential backoff:
+
+```ts
+async function withRateLimitRetry<T>(fn: () => Promise<Response>, body: () => Promise<T>): Promise<T> {
+  for (let i = 0; i < 5; i++) {
+    const res = await fn();
+    if (res.status !== 429) return body();
+
+    const retryAfterHeader = res.headers.get("retry-after");
+    const seconds = retryAfterHeader ? Number(retryAfterHeader) : 2 ** i;
+    await new Promise((r) => setTimeout(r, seconds * 1000));
+  }
+  throw new Error("rate limit retry exhausted");
+}
+```
+
+## Per-IP caveats
+
+If you're calling from a single egress IP across many merchant keys
+(e.g. a multi-tenant proxy), you may hit per-IP caps on auth endpoints
+before per-key caps. Split egress IPs or contact support.
+
+## Request ID
+
+Every response envelope carries a `requestId` field — include it in
+support tickets so we can trace the exact request:
+
+```json
+{ "requestId": "01900b...", "success": true, "data": { /* ... */ } }
+```
+
+
+# API reference
+Source: https://skinshark.gg/docs/openapi.yaml
+
+Every endpoint of the merchant API. Authenticate with the `api-key` header; act as a sub-user with `On-Behalf-Of`. For exact request and response schemas, see the OpenAPI specification linked above.
+
+## Merchant profile / fees / stats
+
+### GET /merchant
+
+**Get merchant profile**
+
+**Auth context:** merchant only. `On-Behalf-Of` rejected.
+
+Returns the merchant's identity, fees, 2FA state, and current
+spot/earnings balances.
+
+### GET /merchant/fees
+
+**Get fee configuration**
+
+**Auth context:** merchant only.
+
+Returns the merchant's `merchantFeeBps`, the per-merchant default house
+fee for new sub-users, the global default, and the resolved effective
+child fee (`childDefaultFeeBps ?? globalDefaultFeeBps`).
+
+Fee configuration is read-only over the API. To adjust your merchant
+fee, sign in to the merchant dashboard.
+
+## Sub-users
+
+### GET /merchant/stats
+
+**Get account statistics**
+
+**Auth context:** merchant only.
+
+Optional `from` / `to` window (ISO date-time). If both omitted, returns
+all-time totals. `bySubUser` is the top 10 by GMV in the window.
+
+### GET /merchant/users
+
+**List sub-users**
+
+**Auth context:** merchant only.
+
+### POST /merchant/users
+
+**Create sub-user**
+
+**Auth context:** merchant only. **Rate limit: 100/min.**
+
+At least one of `email` or `steamId` is required. `externalId` is your
+own stable identifier and can be used in subsequent calls (path params,
+`On-Behalf-Of`).
+
+New sub-users inherit the merchant's `feeBps` (per-merchant default,
+falling back to the global default).
+
+### GET /merchant/users/{id}
+
+**Get sub-user**
+
+**Auth context:** merchant only.
+
+### DELETE /merchant/users/{id}
+
+**Delete sub-user**
+
+**Auth context:** merchant only. **Rate limit: 30/min.**
+
+Sub-user is marked deleted; their wallet is closed. Cannot be undone via
+API. Returns `null` data on success.
+
+### POST /merchant/users/{id}/suspend
+
+**Suspend sub-user**
+
+**Auth context:** merchant only. **Rate limit: 30/min.** Login + buy blocked while suspended.
+
+### POST /merchant/users/{id}/reactivate
+
+**Reactivate sub-user**
+
+**Auth context:** merchant only. **Rate limit: 30/min.**
+
+## Merchant wallet
+
+### POST /merchant/users/{id}/fund
+
+**Fund sub-user wallet**
+
+**Auth context:** merchant only. **Rate limit: 100 / 5min.**
+
+Requires `Idempotency-Key`. Replay returns the original transaction id
+with `idempotent: true`. The sub-user's wallet currency must match the
+merchant's spot currency.
+
+Common error keys:
+- `INSUFFICIENT_BALANCE` (1500)
+- `TRANSFER_CURRENCY_MISMATCH` (1520)
+- `IDEMPOTENCY_KEY_REQUIRED` (1511) / `IDEMPOTENCY_CONFLICT` (1510)
+
+### GET /merchant/wallet
+
+**Get merchant balance**
+
+**Auth context:** merchant only.
+
+- `type=spot` (default) — funds available to spend / fund sub-users.
+- `type=earnings` — treasury wallet credited at trade settlement.
+
+### GET /merchant/ledger
+
+**Get merchant ledger**
+
+**Auth context:** merchant only. Postings against the merchant''s spot or earnings wallet.
+
+### GET /merchant/users/{id}/wallet
+
+**Get sub-user balance**
+
+**Auth context:** merchant only.
+
+Sub-users only hold a `spot` wallet, so no `type` query is accepted.
+Path `id` accepts the sub-user's UUID **or** your `externalId`.
+
+### GET /merchant/users/{id}/ledger
+
+**Get sub-user ledger**
+
+**Auth context:** merchant only.
+
+Postings against the sub-user's spot wallet. Path `id` accepts the
+sub-user's UUID **or** your `externalId`. Same response shape as
+`/merchant/ledger`.
+
+### GET /merchant/trades
+
+**List trades**
+
+**Auth context:** merchant only. Cursor-paginated.
+
+Filters: `status`, `subUserId` (UUID or externalId), `itemName`,
+`externalId` (your trade externalId), `offerId`, `tradeId`, `from`,
+`to`.
+
+### GET /merchant/trades/{id}
+
+**Get trade**
+
+**Auth context:** merchant only.
+
+### GET /merchant/users/{id}/trades
+
+**List sub-user trades**
+
+**Auth context:** merchant only. Same filters as `/merchant/trades` minus `subUserId`.
+
+### GET /user
+
+**Get sub-user profile**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+Returns the sub-user's identity, Steam link (primary trade URL),
+Discord link (if connected), wallet snapshot.
+
+### GET /user/settings/tradeurls
+
+**List trade URLs**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+### POST /user/settings/tradeurls
+
+**Add trade URL**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+Server resolves the SteamID and persona via Steam — request can fail with
+`TRADEURL_INVALID_TOKEN` (1413) if the trade URL is invalid, expired, or the
+Steam profile / inventory is private. `TRADEURL_ESCROW` (1414) if the account
+has trade hold enabled.
+
+### PATCH /user/settings/tradeurls/{id}
+
+**Update trade URL**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+Provide at least one of `url` or `isPrimary`. Only one URL per sub-user
+can be primary.
+
+## Sub-user wallet
+
+### DELETE /user/settings/tradeurls/{id}
+
+**Delete trade URL**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+### GET /user/wallet/balance
+
+**Get wallet balance**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+### GET /user/wallet/ledger
+
+**Get wallet ledger**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+### GET /user/wallet/deposit/gate/chains
+
+**List Gate Pay chains**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+### POST /user/wallet/deposit/gate/quote
+
+**Quote Gate Pay deposit**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+Quote is short-lived (TTL embedded in `expiresIn`). Pass `quoteToken` to
+the create endpoint to commit.
+
+### POST /user/wallet/deposit/gate
+
+**Create Gate Pay deposit**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+Returns either a hosted `whitelabelUrl` (redirect the sub-user there) or
+an on-chain pay-to address — usually both. Settlement happens via the
+gateway webhook; subscribe to `deposit.transfer` / `deposit.completed`
+WS events for the sub-user.
+
+### POST /user/wallet/deposit/onramp/quote
+
+**Quote card deposit**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+### POST /user/wallet/deposit/onramp/session
+
+**Create card deposit session**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+Returns a `whitelabelUrl` to redirect the sub-user to. After payment,
+the on-ramp partner posts a callback and the sub-user's wallet is
+credited; subscribe to `deposit.completed` WS events to react.
+
+### GET /user/wallet/deposit/crypto/address
+
+**Get crypto deposit address**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+Same EVM address across all supported chains; idempotent (the address is
+provisioned on first call and cached). Listed `tokens` are accepted at
+launch — sending other ERC-20s will result in `deposit.failed` with
+reason `unsupported_token`.
+
+## Partner crypto payout custody
+
+### POST /user/wallet/deposit/crypto/quote
+
+**Quote crypto deposit**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+Returns per-chain receive amount and gas preview for the requested
+token + amount. Used to show the sub-user the cheapest network.
+
+### GET /user/wallet/payout/crypto/address
+
+**Get payout address**
+
+**Auth context:** merchant — no `On-Behalf-Of`. Requires `cryptoPayoutEnabled=true`.
+
+Returns a **distinct** EVM forwarder address dedicated to partner-custody deposits.
+Funds sent here are credited to the merchant's payout balance (per-(chain, token)
+sidecar), **not** the spot wallet. This address is allocated lazily on first call
+and cached forever.
+
+Confirm before depositing: this is different from `/deposit/crypto/address` even
+though both are CREATE2 forwarders derived for the same merchant.
+
+### GET /user/wallet/payout/crypto/balances
+
+**List payout balances**
+
+**Auth context:** merchant. Requires `cryptoPayoutEnabled=true`.
+
+Source of truth for what can be withdrawn on each chain. The aggregate USD balance
+also lives in the merchant's `payout_crypto` wallet (one ledger account, one currency),
+but the breakdown by chain × token only exists here.
+
+> **Each (chain, token) row is an independent withdrawable bucket.** SkinShark does
+> not hold cross-chain liquidity — funds deposited on chain X / token Y can only
+> be withdrawn on chain X / token Y.
+
+### POST /user/wallet/payout/crypto/withdraw/quote
+
+**Quote payout withdrawal**
+
+**Auth context:** merchant. Requires `cryptoPayoutEnabled=true`. **Rate limit: 60/min.**
+
+Returns the current network fee (`liveFeeUsdCents`) plus a min/p25/avg/p75/max
+distribution over the last ~24h so you can decide whether *now* is a good moment.
+Purely advisory — no state is mutated.
+
+On L2 chains (Base, Arbitrum, Optimism), fees are `"0"` and stats are all `"0"`.
+
+### POST /user/wallet/payout/crypto/withdraw
+
+**Create payout withdrawal**
+
+**Auth context:** merchant — **API key only** (JWT not accepted; this is the one
+write endpoint in the payout group). Requires `cryptoPayoutEnabled=true`, a
+provisioned webhook signing secret, and at least one active `CallbackUrl`
+registered for the merchant.
+
+> **Idempotent on `externalId`.** Retrying the same `externalId` returns the
+> **original** withdrawal unchanged (idempotent replay) — it never double-spends
+> or errors. The `1824` conflict is only returned on a genuine concurrent duplicate
+> racing the first create.
+
+> **Withdrawals are per (chain, token), not from a single pool.** SkinShark does
+> not hold cross-chain liquidity. You can only withdraw from a chain × token
+> combination you previously deposited to. Depositing USDC on Base and asking to
+> withdraw USDC on Ethereum will fail with `1822 CRYPTO_PAYOUT_INSUFFICIENT_BALANCE`
+> even if you have plenty of USDC on Base. Use `GET /payout/crypto/balances` to
+> see what's withdrawable on each chain.
+
+Flow:
+1. Live fee computed; rejected with `1821` if `maxFeeUsdCents` is set and the live
+   fee exceeds it. No state mutated.
+2. Atomic transaction: sidecar decremented by `amountCents + liveFeeUsdCents`
+   (rejected with `1822` if insufficient), `payout_withdraw_lock` ledger posting,
+   withdrawal row created in `pending_callback`.
+3. Synchronous **approval call**: a signed POST of type
+   **`payout.crypto.withdraw.approval`** is sent to your `CallbackUrl` (5s timeout),
+   separate from the async lifecycle queue. Return **2xx to approve** (release funds)
+   or **4xx to reject**. The request carries `webhook-id`, `webhook-timestamp`, and
+   `webhook-signature` headers — the signature is **always present** (payouts require
+   a provisioned signing secret), so verify it before acting.
+4. On 2xx → `queued` → `broadcast` → `confirmed`. On 4xx → immediate refund. On
+   5xx/timeout/network → retry up to 3 times, then refund. Any rejection, failure,
+   or on-chain revert resolves to the single terminal status `refunded`.
+5. Lifecycle events (`payout.crypto.withdraw.broadcast`, `.confirmed`, and the
+   single terminal `.refunded`) are delivered asynchronously via the standard signed
+   webhook queue. There is no separate `.failed` delivery.
+
+### GET /user/wallet/payout/crypto/withdrawals
+
+**List payout withdrawals**
+
+**Auth context:** merchant. Requires `cryptoPayoutEnabled=true`.
+
+Cursor-paginated, most-recent first. Filter by status, chain, or `forUserId`
+(the sub-user UUID stamped at create time, not the partner externalId).
+
+### GET /user/wallet/payout/crypto/withdrawals/{id}
+
+**Get payout withdrawal**
+
+**Auth context:** merchant. Returns full detail including current status, on-chain
+txHash (once `broadcast`), failure reason, and callback retry count.
+
+### POST /user/wallet/deposit/{id}/cancel
+
+**Cancel deposit**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+Works for `gatepay` and `onramp` deposits in non-final state (`initiated`,
+`pending`, `partial`). No-op once the deposit is `completed`, `refunded`,
+`cancelled`, `expired`, or `failed`.
+
+## Catalog
+
+### POST /user/wallet/deposit/{id}/resume
+
+**Resume deposit**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+Returns the current `whitelabelUrl` / on-chain address for an existing
+deposit so a user can finish paying after closing the original session.
+
+### GET /market/search/suggestions
+
+**Search suggestions**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
+
+### GET /market/search
+
+**Search items**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
+
+Page-paginated. Returns canonical items (not listings) — to see live
+offers for an item, hit `/market/listings/:itemId`.
+
+### GET /market/prices
+
+**List item prices**
+
+**Auth context:** merchant only. `On-Behalf-Of` rejected.
+
+Page-paginated catalog feed of per-item floors: `instant` (C5 auto-deliver)
+and `standard` (blended C5 + Eco min, the same value `/market/search` returns).
+Both are after the caller's fee. Either may be `null` when the item has no
+matching live listing. Pass `limit=-1` to return the whole catalog in one
+response (no pagination).
+
+## Listings
+
+### GET /market/items/{itemId}
+
+**Get item**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
+
+Includes per-marketplace `offersOverview` (best price + count) for the
+markets the item is currently listed on.
+
+### GET /market/items/{itemId}/listings
+
+**List item listings**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
+
+Live cross-marketplace offers for an item, dispatched to marketplace
+workers. `market` filters by marketplace index (0 = all). For Doppler
+knives, optionally filter by `phase`. For float-relevant items, pass
+`wearMin` + `wearMax` together (both required if either is sent).
+
+### GET /market/listings/{listingId}
+
+**Get listing**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+Used to refresh the latest price/availability on a listing the sub-user
+is about to buy.
+
+## Trading
+
+### GET /market
+
+**Live market snapshot**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+Full snapshot of the admin-curated live market — the cheapest live
+listings across the watched items, sorted cheapest-first, with the
+sub-user's fee already applied. Served fresh from the live cache (no
+outward caching). Each `items[].id` is a buyable listing id — pass it
+straight to `/market/buy`.
+
+Subsequent changes stream over
+`wss://api.skinshark.gg/market/live?scope=watchlist`. `page`/`limit`
+page through it; `limit=-1` returns the whole feed in one response.
+
+### POST /market/buy
+
+**Buy listings**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+Each `items[]` entry references a `listingId` and a `maxPrice` ceiling.
+If the listing's price moved above `maxPrice` between catalog read and
+purchase, that item fails.
+
+Sub-user wallet is debited synchronously by `totalPrice` (escrowed); the
+Trade then runs through marketplace workers. Subscribe to `trade.*` WS
+events for status updates.
+
+Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
+`PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
+Returns `503 SERVICE_DISABLED` when admin has paused trading.
+
+### POST /market/buy/quick
+
+**Quick buy**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+Used for bulk fills. The server selects up to `amount` listings ≤
+`maxPrice` for the given `itemId` and creates one Trade. `itemCount` in
+the response is the actual purchased count (may be less than
+`requestedCount` if supply ran out at the cap).
+Returns `503 SERVICE_DISABLED` when admin has paused trading.
+
+### GET /market/transactions
+
+**List transactions**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. Cursor-paginated.
+
+### GET /market/transactions/{tradeId}
+
+**Get transaction**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+## Websocket
+
+### POST /market/transactions/{tradeId}/items/{itemId}/cancel
+
+**Cancel transaction item**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+Best-effort — marketplace must still accept the cancellation. The
+response `status` field reflects whether the cancel succeeded.
+
+### POST /auth/ws-token
+
+**Create WebSocket token**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+Returns a 1-hour JWT scoped to `[deposit, trade, market]`. Pass it as
+the `?token=` query string when opening `wss://api.skinshark.gg/ws`
+(deposit + trade events) or `wss://api.skinshark.gg/market/live` (the
+`market` scope — live-market feed).
+
+Tokens are bound to the sub-user resolved from `On-Behalf-Of` — the
+WebSocket only receives events for that user. To watch multiple
+sub-users, mint a token per sub-user and open one socket each.
+
+### GET /ws
+
+**Open WebSocket connection**
+
+**Auth context:** sub-user — token from `POST /auth/ws-token`.
+
+Open with `wss://api.skinshark.gg/ws?token=<wsToken>`. The token is
+verified at upgrade; on failure the server closes with code `4001
+Invalid token`.
+
+### Protocol
+
+- **Read-only.** Any client → server frame closes the socket with code
+  `4002 Read-only`.
+- **Heartbeat.** The server sends WS pings; respond with pongs to keep
+  the connection alive (handled automatically by most clients).
+- **First frame.** Immediately after upgrade, the server sends
+  `WsConnectedEvent` with the resolved `userId`.
+- **Subsequent frames.** All push events conform to `WsEvent` — a
+  discriminated union keyed by the top-level `event` field.
+
+### Close codes
+
+| Code | Reason          | Cause                                          |
+|------|-----------------|------------------------------------------------|
+| 4001 | Missing token   | No `?token=` query string                      |
+| 4001 | Invalid token   | Bad signature, expired, or wrong purpose       |
+| 4002 | Read-only       | Client sent any frame after upgrade            |
+
+### Events
+
+Each frame has the shape `{ event, data, ts }` where `ts` is Unix epoch
+ms. See the `WsEvent` schema below for the full union — the deposit
+events differ between gateway-hosted (gatepay/onramp) and self-hosted
+crypto deposits even though they share `event` names.
+
+### GET /ws/events
+
+**WebSocket events (reference)**
+
+This is a documentation-only path — there is no HTTP endpoint at
+`/ws/events`. Use it to navigate the message schemas pushed over
+`/ws`.
+
+Discriminate on `event`:
+
+- `connected` → WsConnectedEvent
+- `deposit.transfer` → WsDepositTransferEvent (gatepay on-chain detected)
+- `deposit.completed` → WsGatewayDepositCompletedEvent **or** WsCryptoDepositCreditedEvent (distinguish by `data.fundingId` vs `data.depositId`)
+- `deposit.failed` → WsDepositFailedEvent **or** WsCryptoDepositFailedEvent (distinguish by `data.fundingId` vs `data.depositId`)
+- `deposit.refunded` → WsDepositRefundedEvent
+- `deposit.pending` → WsCryptoDepositPendingEvent
+- `trade.<status>` → WsTradeUpdateEvent
+- `system.notice` → WsSystemNoticeEvent
+
+### GET /market/live
+
+**Open live-market WebSocket**
+
+**Auth context:** sub-user — token from `POST /auth/ws-token` (must
+carry the `market` scope).
+
+Open with
+`wss://api.skinshark.gg/market/live?token=<wsToken>&scope=<scope>`:
+
+- `scope=watchlist` — deltas for the curated live market (the same feed
+  served by `GET /market`).
+- `scope=all` (default) — the full C5 firehose: every market event,
+  transformed to our format but not DB-enriched. Uncached, WS-only.
+
+**Read-only.** Any client → server frame closes the socket with code
+`4002`. On connect the server sends `{ event: "market.ready", data: {
+scope }, ts }`, then streams deltas. Prices carry the sub-user's fee.
+
+### Events
+
+Each frame has the shape `{ event, data, ts }` where `ts` is Unix epoch
+ms.
+
+- `market.new` → a listing appeared. `data` is a `MarketListing`.
+- `market.update` → a listing's price/fields changed. `data` is a `MarketListing`.
+- `market.remove` → a listing is gone. `data` is `{ listingId, itemId? }`.
+
+Treat `market.new` and `market.update` identically — upsert the listing
+keyed by `data.id`. On `market.remove`, drop it by `data.listingId`.
+
+### Close codes
+
+| Code | Reason          | Cause                                          |
+|------|-----------------|------------------------------------------------|
+| 4001 | Missing token   | No `?token=` query string                      |
+| 4001 | Invalid token   | Bad signature, expired, or wrong purpose       |
+| 4002 | Read-only       | Client sent any frame after upgrade            |
+| 4003 | Missing scope   | Token lacks the `market` scope                 |
+| 4008 | Too many        | Per-user (5) or total (10k) connection cap reached |
+
