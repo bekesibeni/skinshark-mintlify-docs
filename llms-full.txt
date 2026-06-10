@@ -3549,7 +3549,9 @@ interface TradeListResponse {
 }
 
 interface BuyItem {
-  listingId: string;
+  // Provide exactly one of listingId or listingRawId.
+  listingId?: string;          // from MarketListing.id
+  listingRawId?: string;       // raw listing id
   maxPrice: string;            // decimal string
 }
 
@@ -4867,9 +4869,10 @@ page through it; `limit=-1` returns the whole feed in one response.
 
 **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
-Each `items[]` entry references a `listingId` and a `maxPrice` ceiling.
-If the listing's price moved above `maxPrice` between catalog read and
-purchase, that item fails.
+Each `items[]` entry references a listing — by `listingId` (from
+`MarketListing.id`) or by `listingRawId` — plus a `maxPrice` ceiling.
+Provide exactly one of the two identifiers. If the listing's price moved
+above `maxPrice` between catalog read and purchase, that item fails.
 
 Sub-user wallet is debited synchronously by `totalPrice` (escrowed); the
 Trade then runs through marketplace workers. Subscribe to `trade.*` WS
