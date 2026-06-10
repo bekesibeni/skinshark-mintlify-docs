@@ -1198,13 +1198,23 @@ components:
     # ─────────────────────────────────────────────────────────────────────
     BuyItem:
       type: object
-      required: [listingId, maxPrice]
+      required: [maxPrice]
       additionalProperties: false
+      description: >-
+        Provide exactly one of `listingId` or `listingRawId` to identify the
+        listing. Sending both (or neither) is a 422.
+      oneOf:
+        - required: [listingId]
+        - required: [listingRawId]
       properties:
         listingId:
           type: string
           format: uuid
           description: From `MarketListing.id`.
+        listingRawId:
+          type: string
+          maxLength: 128
+          description: Raw listing id. Alternative to `listingId`.
         maxPrice:
           type: string
           pattern: '^\d+(\.\d{1,2})?$'
@@ -3085,9 +3095,10 @@ paths:
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
-        Each `items[]` entry references a `listingId` and a `maxPrice` ceiling.
-        If the listing's price moved above `maxPrice` between catalog read and
-        purchase, that item fails.
+        Each `items[]` entry references a listing — by `listingId` (from
+        `MarketListing.id`) or by `listingRawId` — plus a `maxPrice` ceiling.
+        Provide exactly one of the two identifiers. If the listing's price moved
+        above `maxPrice` between catalog read and purchase, that item fails.
 
         Sub-user wallet is debited synchronously by `totalPrice` (escrowed); the
         Trade then runs through marketplace workers. Subscribe to `trade.*` WS

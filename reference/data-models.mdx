@@ -307,7 +307,9 @@ interface TradeListResponse {
 }
 
 interface BuyItem {
-  listingId: string;
+  // Provide exactly one of listingId or listingRawId.
+  listingId?: string;          // from MarketListing.id
+  listingRawId?: string;       // raw listing id
   maxPrice: string;            // decimal string
 }
 
