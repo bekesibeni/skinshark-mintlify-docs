@@ -332,6 +332,7 @@ interface QuickBuyBody {
   maxPrice: string;
   amount: number;              // 1–200
   delivery: DeliveryMode;
+  phase?: DopplerPhase;        // EcoSteam-only; cannot combine with delivery: "instant"
   tradeUrl?: string;
   externalId?: string;
 }
