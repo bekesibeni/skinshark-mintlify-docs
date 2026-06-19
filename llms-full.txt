@@ -354,8 +354,9 @@ curl https://api.skinshark.gg/market/buy \
 
 ## 7. Watch it execute
 
-The trade transitions through `initiated → pending → active → hold →
-completed`. Two ways to follow it:
+The happy path is `initiated → pending → active → hold → completed`; a trade can
+also terminate as `failed`, `canceled`, `declined`, or `reverted` (see [trade
+outcomes](/guides/error-handling#async-trade-outcomes)). Two ways to follow it:
 
 <Tabs>
   <Tab title="Poll merchant trades">
@@ -1559,6 +1560,37 @@ await withRetry(() =>
 
 The full table is in [Errors](/reference/errors).
 
+## Async trade outcomes
+
+The keys above are *synchronous* — they come straight back from the `buy` /
+`quick-buy` call. A trade that was accepted can still fail *asynchronously* while
+the marketplace fulfills it. That outcome arrives via webhook (`trade.*`) and on
+the trade's terminal `status`:
+
+| Status | Meaning | Refund |
+|---|---|---|
+| `completed` | Items delivered, hold released. | — |
+| `failed` | Couldn't be placed/delivered. Each item's `error` carries a `TradeFailureCode`. | Full |
+| `canceled` | Canceled before delivery (by the platform, or by the user while still `pending`). | Full |
+| `declined` | Buyer's fault after the Steam offer went out (declined / let it expire). | Full minus a 2% penalty |
+| `reverted` | Delivered, then recalled by the supplier. | Full |
+
+On a `failed` item, `error` is one of:
+
+| `TradeFailureCode` | Meaning | What to do |
+|---|---|---|
+| `LISTING_UNAVAILABLE` | Listing sold / delisted / out of stock. | Retry with another listing. |
+| `PRICE_CHANGED` | Price moved above your `maxPrice`. | Re-quote and retry. |
+| `TRADE_URL_INVALID` | Buyer's Steam trade URL is invalid or expired. | Fix the user's trade URL. |
+| `STEAM_ACCOUNT_RESTRICTED` | Buyer's Steam account can't receive trades (VAC/ban/family view/private). | User fixes their Steam account. |
+| `MARKET_UNAVAILABLE` | Temporary upstream / our-side issue. | Retry later. |
+| `PURCHASE_FAILED` | Unexpected / unmapped failure. | Reconcile, then retry or surface. |
+
+`canceled` and `declined` items carry no `error` code — the status *is* the
+outcome. An optional `errorDetail` string carries the raw marketplace reason
+(e.g. `"c5:ITEM_SOLD item already sold"`) for debugging only — treat it as
+opaque and never branch on it.
+
 ## What to log
 
 Every error has a `requestId`. Log it on every API call (success or fail)
@@ -2597,7 +2629,9 @@ Trade lifecycle:
 - `trade.active` — marketplace is processing/delivering.
 - `trade.hold` — items received, holding for the dispute window.
 - `trade.completed` — hold released, trade settled.
-- `trade.failed` — terminal failure (insufficient supply, marketplace decline, etc.).
+- `trade.failed` — couldn't be placed/delivered (insufficient supply, marketplace decline, etc.). Each item's `error` carries a `TradeFailureCode`; user fully refunded.
+- `trade.canceled` — canceled before delivery (by the platform, or by the user while still `pending`); user fully refunded, no penalty.
+- `trade.declined` — buyer's fault after the Steam offer went out (declined or let it expire); user refunded minus a 2% penalty.
 - `trade.reverted` — items recalled or refunded after the marketplace accepted.
 - `trade.settled` — fee/earnings ledger postings completed (paired with `trade.completed`).
 - `trade.refunded` — full or partial refund posted to the user wallet.
@@ -3270,7 +3304,18 @@ type TradeStatus =
   | "hold"
   | "completed"
   | "failed"
+  | "canceled"
+  | "declined"
   | "reverted";
+
+// Set on a trade item's `error` when its `status` is `failed`.
+type TradeFailureCode =
+  | "LISTING_UNAVAILABLE"
+  | "PRICE_CHANGED"
+  | "TRADE_URL_INVALID"
+  | "STEAM_ACCOUNT_RESTRICTED"
+  | "MARKET_UNAVAILABLE"
+  | "PURCHASE_FAILED";
 
 type TradeType = "buy" | "sell";
 
@@ -3517,7 +3562,8 @@ interface TradeItem {
   delivery?: string;
   status: TradeStatus;
   tradable: boolean;
-  error?: string;
+  error?: TradeFailureCode; // set when status is "failed"
+  errorDetail?: string;     // raw marketplace reason, debug only — opaque
 }
 
 interface Trade {
