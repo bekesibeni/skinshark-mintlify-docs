@@ -232,8 +232,9 @@ curl https://api.skinshark.gg/market/buy \
 
 ## 7. Watch it execute
 
-The trade transitions through `initiated → pending → active → hold →
-completed`. Two ways to follow it:
+The happy path is `initiated → pending → active → hold → completed`; a trade can
+also terminate as `failed`, `canceled`, `declined`, or `reverted` (see [trade
+outcomes](/guides/error-handling#async-trade-outcomes)). Two ways to follow it:
 
 <Tabs>
   <Tab title="Poll merchant trades">

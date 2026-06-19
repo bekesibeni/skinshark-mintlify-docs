@@ -28,7 +28,18 @@ type TradeStatus =
   | "hold"
   | "completed"
   | "failed"
+  | "canceled"
+  | "declined"
   | "reverted";
+
+// Set on a trade item's `error` when its `status` is `failed`.
+type TradeFailureCode =
+  | "LISTING_UNAVAILABLE"
+  | "PRICE_CHANGED"
+  | "TRADE_URL_INVALID"
+  | "STEAM_ACCOUNT_RESTRICTED"
+  | "MARKET_UNAVAILABLE"
+  | "PURCHASE_FAILED";
 
 type TradeType = "buy" | "sell";
 
@@ -275,7 +286,8 @@ interface TradeItem {
   delivery?: string;
   status: TradeStatus;
   tradable: boolean;
-  error?: string;
+  error?: TradeFailureCode; // set when status is "failed"
+  errorDetail?: string;     // raw marketplace reason, debug only — opaque
 }
 
 interface Trade {

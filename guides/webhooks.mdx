@@ -31,7 +31,9 @@ Trade lifecycle:
 - `trade.active` — marketplace is processing/delivering.
 - `trade.hold` — items received, holding for the dispute window.
 - `trade.completed` — hold released, trade settled.
-- `trade.failed` — terminal failure (insufficient supply, marketplace decline, etc.).
+- `trade.failed` — couldn't be placed/delivered (insufficient supply, marketplace decline, etc.). Each item's `error` carries a `TradeFailureCode`; user fully refunded.
+- `trade.canceled` — canceled before delivery (by the platform, or by the user while still `pending`); user fully refunded, no penalty.
+- `trade.declined` — buyer's fault after the Steam offer went out (declined or let it expire); user refunded minus a 2% penalty.
 - `trade.reverted` — items recalled or refunded after the marketplace accepted.
 - `trade.settled` — fee/earnings ledger postings completed (paired with `trade.completed`).
 - `trade.refunded` — full or partial refund posted to the user wallet.
