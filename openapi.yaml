@@ -1346,6 +1346,17 @@ components:
         errorDetail:
           type: string
           description: 'Raw marketplace reason for debugging (e.g. "c5:ITEM_SOLD item already sold"). Not stable — do not branch on it.'
+        refund:
+          type: object
+          description: |
+            Present only on refunded items (status `failed`/`canceled`/`declined`/`reverted`), carried on every
+            trade snapshot and webhook. `amount + penalty == price`. On a buyer-fault `declined` a 2% penalty is
+            withheld; otherwise `penalty` is 0 and `amount` equals `price`.
+          required: [amount, penalty, buyerFault]
+          properties:
+            amount: { type: number, description: Returned to the buyer. }
+            penalty: { type: number, description: "Withheld on buyer fault, else 0." }
+            buyerFault: { type: boolean, description: True when the item was declined as the buyer's fault. }
 
     Trade:
       type: object
@@ -2084,13 +2095,23 @@ paths:
     get:
       operationId: getMerchantTrade
       tags: [Trades]
-      summary: Get trade
-      description: '**Auth context:** merchant only.'
+      summary: Get trade(s)
+      description: |
+        **Auth context:** merchant only.
+
+        Look up a trade by its id or your `externalId`. Pass a single ref to get one `Trade`
+        (404 if it doesn't resolve), or a comma-separated list of up to 100 refs for a batch
+        status poll — that returns an **array** of the trades that resolve (missing refs are
+        omitted, no 404). Comma is the delimiter, so ids containing a comma can't be looked up here.
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - name: id
+          in: path
+          required: true
+          description: One trade id/externalId, or up to 100 comma-separated refs (each ≤ 128 chars).
+          schema: { type: string, minLength: 1 }
       responses:
         '200':
-          description: OK.
+          description: A single `Trade` for one ref, or an array of `Trade` for a comma-separated list.
           content:
             application/json:
               schema:
@@ -2098,7 +2119,11 @@ paths:
                   - $ref: '#/components/schemas/Envelope'
                   - type: object
                     properties:
-                      data: { $ref: '#/components/schemas/Trade' }
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/Trade'
+                          - type: array
+                            items: { $ref: '#/components/schemas/Trade' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
