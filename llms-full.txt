@@ -2634,7 +2634,7 @@ Trade lifecycle:
 - `trade.declined` — buyer's fault after the Steam offer went out (declined or let it expire); user refunded minus a 2% penalty.
 - `trade.reverted` — items recalled or refunded after the marketplace accepted.
 - `trade.settled` — fee/earnings ledger postings completed (paired with `trade.completed`).
-- `trade.refunded` — full or partial refund posted to the user wallet.
+- `trade.refunded` — full or partial refund posted to the user wallet; carries a per-item `refund` block (amount refunded + any buyer-fault penalty, in USD).
 
 Deposit lifecycle:
 
@@ -2734,6 +2734,12 @@ interface WebhookEnvelope {
     | {
         trade: Trade;                   // same shape as GET /merchant/trades/{id}
         settlement?: { houseFeeCents: number; merchantFeeCents: number };
+        refund?: {                      // trade.refunded — per refunded item, USD
+          itemId: string;
+          buyerFault: boolean;
+          refunded: number;             // returned to the wallet (sourcing + fee)
+          penalty: number;              // withheld on buyer fault, else 0
+        };
       }
     | { deposit: Deposit }
     | {
@@ -2751,9 +2757,17 @@ detail endpoint — `id`, `status`, `currency`, `totalPrice`, full
 `items` array, etc. The `items` array reflects the trade's state at
 event-delivery time, including each item's price, marketplace,
 delivery mode, status, and display metadata as it becomes available.
+Each refunded item also carries an inline `refund` breakdown (`amount`,
+`penalty`, `buyerFault`, with `amount + penalty == price`) on the item
+itself — present on **every** trade event once the item is refunded, so
+prefer it over the top-level `refund` block when reconciling.
 Settlement events (`trade.settled`, `trade.completed`) additionally
-include the fee breakdown. Deposit events carry a serialised deposit
-(gateway or self-hosted crypto fields, depending on method).
+include the fee breakdown. `trade.refunded` events additionally include a
+`refund` block — the per-item breakdown of how much went back to the
+wallet (`refunded`) and any buyer-fault `penalty` withheld, both in USD.
+One `trade.refunded` is emitted per refunded item; match it to the item
+via `refund.itemId`. Deposit events carry a serialised deposit (gateway
+or self-hosted crypto fields, depending on method).
 
 ## Delivery headers
 
@@ -4588,9 +4602,14 @@ Filters: `status`, `subUserId` (UUID or externalId), `itemName`,
 
 ### GET /merchant/trades/{id}
 
-**Get trade**
+**Get trade(s)**
 
 **Auth context:** merchant only.
+
+Look up a trade by its id or your `externalId`. Pass a single ref to get one `Trade`
+(404 if it doesn't resolve), or a comma-separated list of up to 100 refs for a batch
+status poll — that returns an **array** of the trades that resolve (missing refs are
+omitted, no 404). Comma is the delimiter, so ids containing a comma can't be looked up here.
 
 ### GET /merchant/users/{id}/trades
 
