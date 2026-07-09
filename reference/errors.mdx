@@ -34,6 +34,7 @@ Codes are organized into 100-block ranges by domain, with sub-groups every
 | 1800–1899 | Crypto Deposits / Withdrawals |
 | 1900–1999 | Merchant Management |
 | 2000–2099 | Marketplace |
+| 2100–2199 | Sell / own Steam bots |
 
 ## HTTP status mapping
 
@@ -112,6 +113,8 @@ Cross-cutting errors that any endpoint can return.
 
 ## User Settings (1400–1422)
 
+<Info>Codes `1415`–`1417` were added in v0.4.x for the sell flow.</Info>
+
 | Code | Key | HTTP | Meaning |
 |---|---|---|---|
 | 1400 | `WRONG_PASSWORD` | 422 | Current password incorrect. |
@@ -125,6 +128,9 @@ Cross-cutting errors that any endpoint can return.
 | 1412 | `TRADEURL_NOT_FOUND` | 404 | Trade URL ID doesn't exist. |
 | 1413 | `TRADEURL_INVALID_TOKEN` | 422 | Trade URL invalid, expired, or inventory private. |
 | 1414 | `TRADEURL_ESCROW` | 422 | Account has trade hold (escrow) enabled. |
+| 1415 | `TRADEURL_STEAM_MISMATCH` | 422 | Trade URL doesn't belong to the Steam account linked to this user. |
+| 1416 | `TRADEURL_NOT_ALLOWED` | 422 | A trade URL can't be passed here — the user's saved trade URL is used. |
+| 1417 | `STEAM_ACCOUNT_REQUIRED` | 403 | Selling requires a linked Steam account. |
 | 1420 | `DISCORD_ALREADY_LINKED` | 409 | Account already linked to a Discord. |
 | 1421 | `DISCORD_NOT_LINKED` | 422 | Unlink called on an unlinked account. |
 | 1422 | `DISCORD_OAUTH_FAILED` | 502 | Discord OAuth handshake failed. |
@@ -230,6 +236,26 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 2032 | `CALLBACK_INVALID` | 401 | Marketplace callback signature failed. |
 | 2040 | `TRADE_NOT_CANCELLABLE` | 409 | Trade not in a cancellable state. |
 | 2041 | `TRADE_CANCEL_TOO_SOON` | 422 | Order must be at least 30 minutes old to cancel. |
+
+## Sell / own Steam bots (2100–2109)
+
+Returned by the sell endpoints (`GET /market/sell/prices`, `GET /market/sell/inventory`,
+`POST /market/sell`). See the [Selling guide](/guides/selling). Selling also reuses
+`PRICE_MISMATCH` (2020), `DUPLICATE_LISTING_ID` (2023), `LISTING_NOT_FOUND` (2011), and
+the trade-URL codes `1415`–`1417`.
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 2100 | `NO_BOTS_AVAILABLE` | 503 | No Steam bots are currently available to process the trade. Retry shortly. |
+| 2101 | `USER_NOT_TRADEABLE` | 422 | Steam account can't trade (trade ban, limited account, or restriction). |
+| 2102 | `INVENTORY_PRIVATE` | 422 | Steam inventory is private or couldn't be read. |
+| 2103 | `STEAM_UNAVAILABLE` | 503 | Steam is temporarily unavailable. Retry shortly. |
+| 2104 | `TRADE_OFFER_FAILED` | 502 | Failed to send the Steam trade offer. |
+| 2105 | `ESCROW_NOT_ALLOWED` | 422 | Steam account has a trade hold (escrow) enabled. |
+| 2106 | `STEAM_BOTS_NOT_CONFIGURED` | 503 | Steam bots aren't configured on the server. |
+| 2107 | `NO_OFFER_FOUND` | 422 | No payout offer is available for one or more of these items. |
+| 2108 | `ITEMS_NOT_ACCEPTED` | 422 | One or more items aren't in the inventory or aren't tradable. |
+| 2109 | `PRICING_UNAVAILABLE` | 503 | Payout pricing is temporarily unavailable. Retry shortly. |
 
 ## Validation error shape
 

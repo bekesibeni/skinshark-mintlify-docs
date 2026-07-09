@@ -288,6 +288,14 @@ interface TradeItem {
   tradable: boolean;
   error?: TradeFailureCode; // set when status is "failed"
   errorDetail?: string;     // raw marketplace reason, debug only — opaque
+  refund?: ItemRefund;      // present only on refunded buy items; amount + penalty === price
+}
+
+// Present only on refunded items (failed/canceled/declined/reverted). Buy trades only.
+interface ItemRefund {
+  amount: number;           // returned to the buyer
+  penalty: number;          // withheld on buyer fault, else 0
+  buyerFault: boolean;      // true when declined as the buyer's fault
 }
 
 interface Trade {
@@ -365,6 +373,71 @@ interface CancelItemResponse {
 }
 ```
 
+## Selling (own-bots)
+
+See the [Selling guide](/guides/selling) for the full flow.
+
+```ts
+// GET /market/sell/prices — the payout book ("what we pay")
+interface SellPrice {
+  marketHashName: string;
+  deposit: number;             // what we pay, USD
+  accepted: boolean;           // currently buyable by our bots
+}
+type SellPricesResponse = SellPrice[];
+
+// GET /market/sell/inventory — the user's items priced for selling
+interface SellInventoryItem {
+  id: string;                  // encoded item id — pass to POST /market/sell items[].id
+  assetid: string;             // raw Steam asset id
+  name: string;
+  marketHashName: string;
+  type: string;
+  iconUrl: string;             // raw Steam icon hash
+  tradable: boolean;
+  marketPrice?: number;        // platform reference price, USD
+  price: number;               // our offer, USD — send this exact value
+  accepted: boolean;           // quote exists AND tradable; only accepted items can be sold
+  exterior?: string;
+  rarity?: string;
+  color?: string;
+  previewToken?: string;
+  wear?: string;               // float value as string
+  paintSeed?: number;
+  doppler?: { status: number; name: string; paintIndex?: number };
+  stickers?: Array<{ name: string; slot: number; wear?: number; iconUrl: string }>;
+  charm?: { name: string; pattern?: string; iconUrl: string };
+}
+
+interface SellInventoryResponse {
+  items: SellInventoryItem[];
+  currency: Currency;
+  count: number;
+}
+
+interface SellItem {
+  // Provide exactly one of id or assetid.
+  id?: string;                 // from SellInventoryItem.id
+  assetid?: string;            // raw Steam asset id
+  price: string;               // decimal string — must equal the live quote to the cent
+}
+
+interface SellBody {
+  items: SellItem[];           // 1–100
+  tradeUrl?: string;           // must belong to the user's linked Steam account
+  externalId?: string;         // your correlation id; replays return the same Trade
+}
+
+interface SellResponse {
+  id: string;
+  status: TradeStatus;         // "initiated" right after submit
+  itemCount: number;
+  totalPrice: number;          // payout in wallet currency, at a locked FX rate
+  currency: Currency;
+  createdAt: string;
+}
+```
+
 ## Catalog & listings
 
 ```ts
@@ -436,6 +509,7 @@ interface MarketListing {
     iconUrl: string;
   };
   inspectUrl?: string;
+  assetId?: string;          // Steam asset id — catalog/listing reads only, not on trades/webhooks
   delivery?: string;
 }
 

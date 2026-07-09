@@ -30,12 +30,13 @@ Base URL: `https://api.skinshark.gg` (staging: `https://api-staging.skinshark.gg
 
 - [Core API](https://skinshark.gg/docs/integration/core-api): Minimal buy-flow integration for an existing wallet.
 - [Full platform](https://skinshark.gg/docs/integration/full-platform): Sub-users, wallets, deposits, and payouts end to end.
+- [Selling](https://skinshark.gg/docs/guides/selling): Buy CS2 items back from users into SkinShark bots, paid from house treasury.
 - [Partner crypto payout](https://skinshark.gg/docs/integration/partner-crypto-payout): Crypto payout custody, withdrawal quotes, and submission.
 
 ## API reference
 
 - [OpenAPI specification](https://skinshark.gg/docs/openapi.yaml): The full machine-readable spec — every endpoint, parameter, schema, and error.
-- Market: Search items, Search suggestions, List item prices, Get item, List item listings, Get listing, Live market snapshot, Buy listings, Quick buy, List/Get transactions, Cancel transaction item.
+- Market: Search items, Search suggestions, List item prices, Get item, List item listings, Get listing, Live market snapshot, Buy listings, Quick buy, Sell prices, Sell inventory, Sell items, List/Get transactions (filter by `type` buy/sell; batch-lookup up to 100 refs comma-separated), Cancel transaction item.
 - Users: List/Create/Get/Delete sub-users, Suspend, Reactivate, Fund sub-user wallet, and per-sub-user wallet, ledger, and trades.
 - Account: Get merchant profile, fee configuration, account statistics, merchant balance, and merchant ledger.
 - Wallet & deposits: Wallet balance and ledger; Gate Pay, card on-ramp, and crypto deposit quote/create; Cancel/Resume deposit.
