@@ -3578,6 +3578,14 @@ interface TradeItem {
   tradable: boolean;
   error?: TradeFailureCode; // set when status is "failed"
   errorDetail?: string;     // raw marketplace reason, debug only — opaque
+  refund?: ItemRefund;      // present only on refunded buy items; amount + penalty === price
+}
+
+// Present only on refunded items (failed/canceled/declined/reverted). Buy trades only.
+interface ItemRefund {
+  amount: number;           // returned to the buyer
+  penalty: number;          // withheld on buyer fault, else 0
+  buyerFault: boolean;      // true when declined as the buyer's fault
 }
 
 interface Trade {
@@ -3655,6 +3663,71 @@ interface CancelItemResponse {
 }
 ```
 
+## Selling (own-bots)
+
+See the [Selling guide](/guides/selling) for the full flow.
+
+```ts
+// GET /market/sell/prices — the payout book ("what we pay")
+interface SellPrice {
+  marketHashName: string;
+  deposit: number;             // what we pay, USD
+  accepted: boolean;           // currently buyable by our bots
+}
+type SellPricesResponse = SellPrice[];
+
+// GET /market/sell/inventory — the user's items priced for selling
+interface SellInventoryItem {
+  id: string;                  // encoded item id — pass to POST /market/sell items[].id
+  assetid: string;             // raw Steam asset id
+  name: string;
+  marketHashName: string;
+  type: string;
+  iconUrl: string;             // raw Steam icon hash
+  tradable: boolean;
+  marketPrice?: number;        // platform reference price, USD
+  price: number;               // our offer, USD — send this exact value
+  accepted: boolean;           // quote exists AND tradable; only accepted items can be sold
+  exterior?: string;
+  rarity?: string;
+  color?: string;
+  previewToken?: string;
+  wear?: string;               // float value as string
+  paintSeed?: number;
+  doppler?: { status: number; name: string; paintIndex?: number };
+  stickers?: Array<{ name: string; slot: number; wear?: number; iconUrl: string }>;
+  charm?: { name: string; pattern?: string; iconUrl: string };
+}
+
+interface SellInventoryResponse {
+  items: SellInventoryItem[];
+  currency: Currency;
+  count: number;
+}
+
+interface SellItem {
+  // Provide exactly one of id or assetid.
+  id?: string;                 // from SellInventoryItem.id
+  assetid?: string;            // raw Steam asset id
+  price: string;               // decimal string — must equal the live quote to the cent
+}
+
+interface SellBody {
+  items: SellItem[];           // 1–100
+  tradeUrl?: string;           // must belong to the user's linked Steam account
+  externalId?: string;         // your correlation id; replays return the same Trade
+}
+
+interface SellResponse {
+  id: string;
+  status: TradeStatus;         // "initiated" right after submit
+  itemCount: number;
+  totalPrice: number;          // payout in wallet currency, at a locked FX rate
+  currency: Currency;
+  createdAt: string;
+}
+```
+
 ## Catalog & listings
 
 ```ts
@@ -3726,6 +3799,7 @@ interface MarketListing {
     iconUrl: string;
   };
   inspectUrl?: string;
+  assetId?: string;          // Steam asset id — catalog/listing reads only, not on trades/webhooks
   delivery?: string;
 }
 
@@ -4067,6 +4141,7 @@ Codes are organized into 100-block ranges by domain, with sub-groups every
 | 1800–1899 | Crypto Deposits / Withdrawals |
 | 1900–1999 | Merchant Management |
 | 2000–2099 | Marketplace |
+| 2100–2199 | Sell / own Steam bots |
 
 ## HTTP status mapping
 
@@ -4145,6 +4220,8 @@ Cross-cutting errors that any endpoint can return.
 
 ## User Settings (1400–1422)
 
+<Info>Codes `1415`–`1417` were added in v0.4.x for the sell flow.</Info>
+
 | Code | Key | HTTP | Meaning |
 |---|---|---|---|
 | 1400 | `WRONG_PASSWORD` | 422 | Current password incorrect. |
@@ -4158,6 +4235,9 @@ Cross-cutting errors that any endpoint can return.
 | 1412 | `TRADEURL_NOT_FOUND` | 404 | Trade URL ID doesn't exist. |
 | 1413 | `TRADEURL_INVALID_TOKEN` | 422 | Trade URL invalid, expired, or inventory private. |
 | 1414 | `TRADEURL_ESCROW` | 422 | Account has trade hold (escrow) enabled. |
+| 1415 | `TRADEURL_STEAM_MISMATCH` | 422 | Trade URL doesn't belong to the Steam account linked to this user. |
+| 1416 | `TRADEURL_NOT_ALLOWED` | 422 | A trade URL can't be passed here — the user's saved trade URL is used. |
+| 1417 | `STEAM_ACCOUNT_REQUIRED` | 403 | Selling requires a linked Steam account. |
 | 1420 | `DISCORD_ALREADY_LINKED` | 409 | Account already linked to a Discord. |
 | 1421 | `DISCORD_NOT_LINKED` | 422 | Unlink called on an unlinked account. |
 | 1422 | `DISCORD_OAUTH_FAILED` | 502 | Discord OAuth handshake failed. |
@@ -4263,6 +4343,26 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 2032 | `CALLBACK_INVALID` | 401 | Marketplace callback signature failed. |
 | 2040 | `TRADE_NOT_CANCELLABLE` | 409 | Trade not in a cancellable state. |
 | 2041 | `TRADE_CANCEL_TOO_SOON` | 422 | Order must be at least 30 minutes old to cancel. |
+
+## Sell / own Steam bots (2100–2109)
+
+Returned by the sell endpoints (`GET /market/sell/prices`, `GET /market/sell/inventory`,
+`POST /market/sell`). See the [Selling guide](/guides/selling). Selling also reuses
+`PRICE_MISMATCH` (2020), `DUPLICATE_LISTING_ID` (2023), `LISTING_NOT_FOUND` (2011), and
+the trade-URL codes `1415`–`1417`.
+
+| Code | Key | HTTP | Meaning |
+|---|---|---|---|
+| 2100 | `NO_BOTS_AVAILABLE` | 503 | No Steam bots are currently available to process the trade. Retry shortly. |
+| 2101 | `USER_NOT_TRADEABLE` | 422 | Steam account can't trade (trade ban, limited account, or restriction). |
+| 2102 | `INVENTORY_PRIVATE` | 422 | Steam inventory is private or couldn't be read. |
+| 2103 | `STEAM_UNAVAILABLE` | 503 | Steam is temporarily unavailable. Retry shortly. |
+| 2104 | `TRADE_OFFER_FAILED` | 502 | Failed to send the Steam trade offer. |
+| 2105 | `ESCROW_NOT_ALLOWED` | 422 | Steam account has a trade hold (escrow) enabled. |
+| 2106 | `STEAM_BOTS_NOT_CONFIGURED` | 503 | Steam bots aren't configured on the server. |
+| 2107 | `NO_OFFER_FOUND` | 422 | No payout offer is available for one or more of these items. |
+| 2108 | `ITEMS_NOT_ACCEPTED` | 422 | One or more items aren't in the inventory or aren't tradable. |
+| 2109 | `PRICING_UNAVAILABLE` | 503 | Payout pricing is temporarily unavailable. Retry shortly. |
 
 ## Validation error shape
 
@@ -4596,9 +4696,10 @@ sub-user's UUID **or** your `externalId`. Same response shape as
 
 **Auth context:** merchant only. Cursor-paginated.
 
-Filters: `status`, `subUserId` (UUID or externalId), `itemName`,
-`externalId` (your trade externalId), `offerId`, `tradeId`, `from`,
-`to`.
+Returns your sub-users' trades, **buy and sell** (as of v0.4.x — previously
+buy-only). Filters: `type` (`buy`/`sell`), `status`, `subUserId` (UUID or
+externalId), `itemName`, `externalId` (your trade externalId), `offerId`,
+`tradeId`, `from`, `to`.
 
 ### GET /merchant/trades/{id}
 
@@ -4606,16 +4707,16 @@ Filters: `status`, `subUserId` (UUID or externalId), `itemName`,
 
 **Auth context:** merchant only.
 
-Look up a trade by its id or your `externalId`. Pass a single ref to get one `Trade`
-(404 if it doesn't resolve), or a comma-separated list of up to 100 refs for a batch
-status poll — that returns an **array** of the trades that resolve (missing refs are
+Look up a trade (buy or sell) by its id or your `externalId`. Pass a single ref to get
+one `Trade` (404 if it doesn't resolve), or a comma-separated list of up to 100 refs for
+a batch status poll — that returns an **array** of the trades that resolve (missing refs
 omitted, no 404). Comma is the delimiter, so ids containing a comma can't be looked up here.
 
 ### GET /merchant/users/{id}/trades
 
 **List sub-user trades**
 
-**Auth context:** merchant only. Same filters as `/merchant/trades` minus `subUserId`.
+**Auth context:** merchant only. Same filters as `/merchant/trades` minus `subUserId`; includes sell trades.
 
 ### GET /user
 
@@ -4898,9 +4999,16 @@ markets the item is currently listed on.
 **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
 
 Live cross-marketplace offers for an item, dispatched to marketplace
-workers. `market` filters by marketplace index (0 = all). For Doppler
-knives, optionally filter by `phase`. For float-relevant items, pass
-`wearMin` + `wearMax` together (both required if either is sent).
+workers. `market` filters by marketplace index (`0` = all, `3` = C5Game,
+`4` = EcoSteam, `6` = YouPin; `1` = Steam is sell-only and rejected here).
+`delivery` filters by delivery mode (`instant` = auto-deliver only); omit
+for both. For Doppler knives, optionally filter by `phase`. For
+float-relevant items, pass `wearMin` + `wearMax` together (both required
+if either is sent).
+
+Listing ids are opaque and ephemeral; the market index is encoded inside
+them. Ids minted before the v0.4.x market-index remap are invalidated —
+always re-read listings before buying rather than caching ids.
 
 ### GET /market/listings/{listingId}
 
@@ -4948,6 +5056,8 @@ Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
 `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
 Returns `503 SERVICE_DISABLED` when admin has paused trading.
 
+## The sub-user hands cs2 items to a skinshark-operated steam bot and is paid
+
 ### POST /market/buy/quick
 
 **Quick buy**
@@ -4960,17 +5070,70 @@ the response is the actual purchased count (may be less than
 `requestedCount` if supply ran out at the cap).
 Returns `503 SERVICE_DISABLED` when admin has paused trading.
 
+### GET /market/sell/prices
+
+**Sell prices**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+The payout book — what we pay per item, in USD. Use it to price a sale
+without reading the user's inventory. `search` filters by market hash name.
+
+### GET /market/sell/inventory
+
+**Sell inventory**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+The user's CS2 inventory (appid 730), each item priced for selling. `price`
+is our USD offer; `accepted` is true only when a quote exists AND the item is
+tradable — only accepted items can be sold. Send each item's `id` + exact
+`price` to `POST /market/sell`. Pass `refresh=true` to bypass the inventory
+cache. Requires a linked Steam account (`STEAM_ACCOUNT_REQUIRED` otherwise).
+
+### POST /market/sell
+
+**Sell items**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: expensive.**
+
+Sell one or more inventory items to a SkinShark bot. Each `items[]` references
+an item by `id` (from `/market/sell/inventory`) or raw `assetid` — exactly one —
+plus the exact `price` you were quoted (cent-exact lock; a stale quote fails with
+`PRICE_MISMATCH`).
+
+No money moves at creation. The API picks a bot and sends the user a **receive-only**
+Steam trade offer; the Trade returns immediately with status `initiated`. The user
+must **accept the Steam offer**, after which status flows `active → hold → completed`.
+Payout is a single credit from house treasury, applied at `hold` if the merchant's
+instant-credit setting is on, otherwise at `completed`. A `reverted` trade is absorbed
+by SkinShark — never clawed back from the user. Sells always target the user's own
+saved trade URL. Subscribe to `trade.*` WS events for status updates.
+
+Common error keys: `STEAM_ACCOUNT_REQUIRED` (1417), `USER_NOT_TRADEABLE` (2101),
+`INVENTORY_PRIVATE` (2102), `ESCROW_NOT_ALLOWED` (2105), `NO_OFFER_FOUND` (2107),
+`ITEMS_NOT_ACCEPTED` (2108), `PRICE_MISMATCH` (2020), `DUPLICATE_LISTING_ID` (2023),
+`NO_BOTS_AVAILABLE` (2100), `PRICING_UNAVAILABLE` (2109), `TRADE_LIMIT_EXCEEDED`.
+
 ### GET /market/transactions
 
 **List transactions**
 
 **Auth context:** sub-user — `On-Behalf-Of` required. Cursor-paginated.
 
+Returns the sub-user's trades, **buy and sell**. Filter with `type` (`buy`/`sell`)
+or `status`.
+
 ### GET /market/transactions/{tradeId}
 
-**Get transaction**
+**Get transaction(s)**
 
 **Auth context:** sub-user — `On-Behalf-Of` required.
+
+Look up a trade by its id or your `externalId`. Pass a single ref to get one `Trade`
+(404 if it doesn't resolve), or a comma-separated list of up to 100 refs for a batch
+status poll — that returns an **array** of the trades that resolve (missing refs are
+omitted, no 404). Comma is the delimiter, so ids containing a comma can't be looked up here.
 
 ## Websocket
 
