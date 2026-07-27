@@ -1049,14 +1049,14 @@ components:
         marketHashName: { type: string }
         instant:
           type: [number, "null"]
-          description: C5 auto-deliver floor, after fee. Null when no instant listing.
+          description: C5 auto-deliver floor, in decimal USD. Null when no instant listing — always null when `market=4` (EcoSteam has no auto-deliver tier).
         standard:
           type: [number, "null"]
-          description: Blended C5 + Eco floor (same value search returns), after fee.
+          description: Cheapest live listing (same value search returns), in decimal USD. Null when nothing is listed.
         phases:
           type: object
           additionalProperties: { type: number }
-          description: Per-Doppler-phase standard prices (EcoSteam only), after fee. Present only for phased (Doppler / Gamma Doppler) items. Keys are canonical phase names.
+          description: 'Per-Doppler-phase standard prices (EcoSteam only), in decimal USD. Present only for phased (Doppler / Gamma Doppler) items, and omitted when empty. Keys are canonical phase names: `Phase 1`–`Phase 4`, `Ruby`, `Sapphire`, `Emerald`, `Black Pearl`.'
 
     MarketPricesResponse:
       type: object
@@ -3101,16 +3101,42 @@ paths:
         **Auth context:** merchant only. `On-Behalf-Of` rejected.
 
         Page-paginated catalog feed of per-item floors: `instant` (C5 auto-deliver)
-        and `standard` (blended C5 + Eco min, the same value `/market/search` returns).
-        Both are after the caller's fee. Either may be `null` when the item has no
-        matching live listing. Pass `limit=-1` to return the whole catalog in one
+        and `standard` (the cheapest live listing, the same value `/market/search`
+        returns). Either may be `null` when the item has no matching live listing —
+        `null` means "nothing listed", not zero. Prices are decimal USD dollars
+        (2dp), never cents. Pass `limit=-1` to return the whole catalog in one
         response (no pagination).
+
+        By default both tiers blend every priced market and include your fee. Use
+        `market` to restrict to one marketplace and `includeFees=false` to get the
+        raw sourcing price instead.
+
+        `standard` and `phases` are sourced separately, so `standard` is **not**
+        guaranteed to equal the cheapest phase — a phased item can carry a `phases`
+        entry below its own `standard`.
       parameters:
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
         - name: limit
           in: query
           description: 1–500 per page, or -1 for the entire catalog in one response.
           schema: { type: integer, default: 100 }
+        - name: market
+          in: query
+          description: |
+            Restrict to one marketplace. `0` (default) blends every priced market;
+            `3` = C5Game, `4` = EcoSteam. Any other index is rejected with `400` —
+            only markets carrying a buyable floor can be filtered on.
+
+            EcoSteam (`4`) has no auto-deliver tier, so `instant` is always `null`
+            there; it is also the only source of `phases`.
+          schema: { type: integer, minimum: 0, maximum: 6, default: 0 }
+        - name: includeFees
+          in: query
+          description: |
+            `false` returns the raw sourcing price with no house/merchant fee
+            applied — what the item actually costs on the marketplace. Only the
+            exact strings `true` / `false` are accepted.
+          schema: { type: string, enum: ["true", "false"], default: "true" }
       responses:
         '200':
           description: OK.
