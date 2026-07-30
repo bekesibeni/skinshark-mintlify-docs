@@ -35,9 +35,11 @@ type TradeStatus =
 // Set on a trade item's `error` when its `status` is `failed`.
 type TradeFailureCode =
   | "LISTING_UNAVAILABLE"
+  | "NO_LISTING_AT_PRICE"
   | "PRICE_CHANGED"
   | "TRADE_URL_INVALID"
   | "STEAM_ACCOUNT_RESTRICTED"
+  | "BUYER_TRADE_RESTRICTED"
   | "MARKET_UNAVAILABLE"
   | "PURCHASE_FAILED";
 

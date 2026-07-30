@@ -1345,12 +1345,15 @@ components:
         tradable: { type: boolean }
         error:
           type: string
-          enum: [LISTING_UNAVAILABLE, PRICE_CHANGED, TRADE_URL_INVALID, STEAM_ACCOUNT_RESTRICTED, MARKET_UNAVAILABLE, PURCHASE_FAILED]
+          enum: [LISTING_UNAVAILABLE, NO_LISTING_AT_PRICE, PRICE_CHANGED, TRADE_URL_INVALID, STEAM_ACCOUNT_RESTRICTED, BUYER_TRADE_RESTRICTED, MARKET_UNAVAILABLE, PURCHASE_FAILED]
           description: |
             Set when the item `status` is `failed`. Stable partner-facing code:
-            `LISTING_UNAVAILABLE` (sold/delisted/out of stock — retry another listing),
+            `LISTING_UNAVAILABLE` (the listing sold/was delisted — retry another listing),
+            `NO_LISTING_AT_PRICE` (nothing on sale at or below your max — re-quote higher or wait for restock),
             `PRICE_CHANGED` (price moved above your max), `TRADE_URL_INVALID` (buyer's Steam trade URL is invalid),
-            `STEAM_ACCOUNT_RESTRICTED` (buyer's Steam account can't trade), `MARKET_UNAVAILABLE` (temporary upstream/our-side
+            `STEAM_ACCOUNT_RESTRICTED` (buyer's Steam account can't trade),
+            `BUYER_TRADE_RESTRICTED` (the marketplace suspended this buyer, e.g. for repeated trade-offer no-shows,
+            usually until a stated time — retrying sooner cannot succeed), `MARKET_UNAVAILABLE` (temporary upstream/our-side
             issue — retry later), `PURCHASE_FAILED` (unexpected). `canceled`/`declined` items carry no code; the status is the outcome.
         errorDetail:
           type: string

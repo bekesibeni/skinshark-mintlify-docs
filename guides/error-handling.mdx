@@ -231,10 +231,12 @@ On a `failed` item, `error` is one of:
 
 | `TradeFailureCode` | Meaning | What to do |
 |---|---|---|
-| `LISTING_UNAVAILABLE` | Listing sold / delisted / out of stock. | Retry with another listing. |
+| `LISTING_UNAVAILABLE` | The listing sold or was delisted. | Retry with another listing. |
+| `NO_LISTING_AT_PRICE` | Nothing on sale at or below your `maxPrice`. | Re-quote higher, or wait for restock. |
 | `PRICE_CHANGED` | Price moved above your `maxPrice`. | Re-quote and retry. |
 | `TRADE_URL_INVALID` | Buyer's Steam trade URL is invalid or expired. | Fix the user's trade URL. |
 | `STEAM_ACCOUNT_RESTRICTED` | Buyer's Steam account can't receive trades (VAC/ban/family view/private). | User fixes their Steam account. |
+| `BUYER_TRADE_RESTRICTED` | The marketplace suspended this buyer, e.g. for repeated trade-offer no-shows — usually until a stated time. | User accepts their pending offers; retrying sooner cannot succeed. |
 | `MARKET_UNAVAILABLE` | Temporary upstream / our-side issue. | Retry later. |
 | `PURCHASE_FAILED` | Unexpected / unmapped failure. | Reconcile, then retry or surface. |
 
