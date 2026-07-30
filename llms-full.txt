@@ -4976,10 +4976,19 @@ offers for an item, hit `/market/listings/:itemId`.
 **Auth context:** merchant only. `On-Behalf-Of` rejected.
 
 Page-paginated catalog feed of per-item floors: `instant` (C5 auto-deliver)
-and `standard` (blended C5 + Eco min, the same value `/market/search` returns).
-Both are after the caller's fee. Either may be `null` when the item has no
-matching live listing. Pass `limit=-1` to return the whole catalog in one
+and `standard` (the cheapest live listing, the same value `/market/search`
+returns). Either may be `null` when the item has no matching live listing —
+`null` means "nothing listed", not zero. Prices are decimal USD dollars
+(2dp), never cents. Pass `limit=-1` to return the whole catalog in one
 response (no pagination).
+
+By default both tiers blend every priced market and include your fee. Use
+`market` to restrict to one marketplace and `includeFees=false` to get the
+raw sourcing price instead.
+
+`standard` and `phases` are sourced separately, so `standard` is **not**
+guaranteed to equal the cheapest phase — a phased item can carry a `phases`
+entry below its own `standard`.
 
 ## Listings
 
