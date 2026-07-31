@@ -137,7 +137,8 @@ interface WebhookEnvelope {
         trade: Trade;                   // same shape as GET /merchant/trades/{id}
         settlement?: { houseFeeCents: number; merchantFeeCents: number };
         refund?: {                      // trade.refunded — per refunded item, USD
-          itemId: string;
+          itemId: string;               // matches TradeItem.id
+          externalId?: string;          // your own per-item ref, when you supplied one
           buyerFault: boolean;
           refunded: number;             // returned to the wallet (sourcing + fee)
           penalty: number;              // withheld on buyer fault, else 0

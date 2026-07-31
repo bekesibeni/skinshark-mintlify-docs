@@ -46,6 +46,8 @@ run as the merchant. So you only ever need:
 | Buy by item, server picks fills | `POST /market/buy/quick` |
 | List trades | `GET /market/transactions` (or `GET /merchant/trades`) |
 | Get trade detail | `GET /market/transactions/{tradeId}` |
+| Cancel one undelivered item | `POST /market/transactions/{tradeId}/items/{itemId}/cancel` |
+| Cancel a whole trade | `POST /market/transactions/{tradeId}/cancel` |
 | Stats (GMV, fees) | `GET /merchant/stats` |
 | Deposit (Gate Pay / on-ramp / crypto) | `POST /user/wallet/deposit/...` |
 
@@ -87,6 +89,37 @@ A typical day in Core API:
   </Step>
 </Steps>
 
+## Cancelling an order
+
+```ts
+// One item
+await api(`/market/transactions/${tradeRef}/items/${itemRef}/cancel`, { method: "POST" });
+// Everything still cancellable on the trade
+await api(`/market/transactions/${tradeRef}/cancel`, { method: "POST" });
+```
+
+`tradeRef` is the trade id or the `externalId` you sent. `itemRef` is `TradeItem.id` or the
+per-item `externalId` you sent — set one on every item you might want to cancel later:
+
+```ts
+items: [{ listingId, maxPrice, externalId: "order-42-item-1" }]
+// quick buy: one ref per unit, in order
+{ itemId, maxPrice, amount: 3, delivery: "standard",
+  externalIds: ["order-42-a", "order-42-b", "order-42-c"] }
+```
+
+For quick buys this is the only way to tell your units apart. Fills arrive over time and in no
+fixed order, and a quick-buy item has no listing of its own to name.
+
+An item is cancellable only while `initiated` or `pending`, once the order reached the supplier,
+and no earlier than **30 minutes** after creation — before that you get `TRADE_CANCEL_TOO_SOON`
+with `cancellableAt`. Anything already delivered or in flight to Steam is `TRADE_NOT_CANCELLABLE`.
+
+Both are best-effort. The trade-level call returns `200` even when some items are refused, with
+a per-item `status` and `reason`, so check the body rather than the status code. A successful
+cancel refunds in full with no penalty, and the money arrives asynchronously via
+`trade.refunded` — the response only confirms the supplier accepted.
+
 ## Code template
 
 ```ts
@@ -103,7 +136,13 @@ async function checkoutOnSkinShark(input: {
     {
       method: "POST",
       body: JSON.stringify({
-        items: [{ listingId: input.listingId, maxPrice: input.maxPrice }],
+        items: [
+          {
+            listingId: input.listingId,
+            maxPrice: input.maxPrice,
+            externalId: `${input.checkoutId}-1`,
+          },
+        ],
         externalId: input.checkoutId,
       }),
     },

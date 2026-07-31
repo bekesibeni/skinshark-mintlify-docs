@@ -1579,10 +1579,12 @@ On a `failed` item, `error` is one of:
 
 | `TradeFailureCode` | Meaning | What to do |
 |---|---|---|
-| `LISTING_UNAVAILABLE` | Listing sold / delisted / out of stock. | Retry with another listing. |
+| `LISTING_UNAVAILABLE` | The listing sold or was delisted. | Retry with another listing. |
+| `NO_LISTING_AT_PRICE` | Nothing on sale at or below your `maxPrice`. | Re-quote higher, or wait for restock. |
 | `PRICE_CHANGED` | Price moved above your `maxPrice`. | Re-quote and retry. |
 | `TRADE_URL_INVALID` | Buyer's Steam trade URL is invalid or expired. | Fix the user's trade URL. |
 | `STEAM_ACCOUNT_RESTRICTED` | Buyer's Steam account can't receive trades (VAC/ban/family view/private). | User fixes their Steam account. |
+| `BUYER_TRADE_RESTRICTED` | The marketplace suspended this buyer, e.g. for repeated trade-offer no-shows — usually until a stated time. | User accepts their pending offers; retrying sooner cannot succeed. |
 | `MARKET_UNAVAILABLE` | Temporary upstream / our-side issue. | Retry later. |
 | `PURCHASE_FAILED` | Unexpected / unmapped failure. | Reconcile, then retry or surface. |
 
@@ -1670,6 +1672,8 @@ run as the merchant. So you only ever need:
 | Buy by item, server picks fills | `POST /market/buy/quick` |
 | List trades | `GET /market/transactions` (or `GET /merchant/trades`) |
 | Get trade detail | `GET /market/transactions/{tradeId}` |
+| Cancel one undelivered item | `POST /market/transactions/{tradeId}/items/{itemId}/cancel` |
+| Cancel a whole trade | `POST /market/transactions/{tradeId}/cancel` |
 | Stats (GMV, fees) | `GET /merchant/stats` |
 | Deposit (Gate Pay / on-ramp / crypto) | `POST /user/wallet/deposit/...` |
 
@@ -1711,6 +1715,37 @@ A typical day in Core API:
   </Step>
 </Steps>
 
+## Cancelling an order
+
+```ts
+// One item
+await api(`/market/transactions/${tradeRef}/items/${itemRef}/cancel`, { method: "POST" });
+// Everything still cancellable on the trade
+await api(`/market/transactions/${tradeRef}/cancel`, { method: "POST" });
+```
+
+`tradeRef` is the trade id or the `externalId` you sent. `itemRef` is `TradeItem.id` or the
+per-item `externalId` you sent — set one on every item you might want to cancel later:
+
+```ts
+items: [{ listingId, maxPrice, externalId: "order-42-item-1" }]
+// quick buy: one ref per unit, in order
+{ itemId, maxPrice, amount: 3, delivery: "standard",
+  externalIds: ["order-42-a", "order-42-b", "order-42-c"] }
+```
+
+For quick buys this is the only way to tell your units apart. Fills arrive over time and in no
+fixed order, and a quick-buy item has no listing of its own to name.
+
+An item is cancellable only while `initiated` or `pending`, once the order reached the supplier,
+and no earlier than **30 minutes** after creation — before that you get `TRADE_CANCEL_TOO_SOON`
+with `cancellableAt`. Anything already delivered or in flight to Steam is `TRADE_NOT_CANCELLABLE`.
+
+Both are best-effort. The trade-level call returns `200` even when some items are refused, with
+a per-item `status` and `reason`, so check the body rather than the status code. A successful
+cancel refunds in full with no penalty, and the money arrives asynchronously via
+`trade.refunded` — the response only confirms the supplier accepted.
+
 ## Code template
 
 ```ts
@@ -1727,7 +1762,13 @@ async function checkoutOnSkinShark(input: {
     {
       method: "POST",
       body: JSON.stringify({
-        items: [{ listingId: input.listingId, maxPrice: input.maxPrice }],
+        items: [
+          {
+            listingId: input.listingId,
+            maxPrice: input.maxPrice,
+            externalId: `${input.checkoutId}-1`,
+          },
+        ],
         externalId: input.checkoutId,
       }),
     },
@@ -2735,7 +2776,8 @@ interface WebhookEnvelope {
         trade: Trade;                   // same shape as GET /merchant/trades/{id}
         settlement?: { houseFeeCents: number; merchantFeeCents: number };
         refund?: {                      // trade.refunded — per refunded item, USD
-          itemId: string;
+          itemId: string;               // matches TradeItem.id
+          externalId?: string;          // your own per-item ref, when you supplied one
           buyerFault: boolean;
           refunded: number;             // returned to the wallet (sourcing + fee)
           penalty: number;              // withheld on buyer fault, else 0
@@ -3325,9 +3367,11 @@ type TradeStatus =
 // Set on a trade item's `error` when its `status` is `failed`.
 type TradeFailureCode =
   | "LISTING_UNAVAILABLE"
+  | "NO_LISTING_AT_PRICE"
   | "PRICE_CHANGED"
   | "TRADE_URL_INVALID"
   | "STEAM_ACCOUNT_RESTRICTED"
+  | "BUYER_TRADE_RESTRICTED"
   | "MARKET_UNAVAILABLE"
   | "PURCHASE_FAILED";
 
@@ -3554,7 +3598,8 @@ interface TransactionHistory {
 
 ```ts
 interface TradeItem {
-  id: string;
+  id: string;               // stable handle; pass as itemId when cancelling
+  externalId?: string;      // your own per-item ref, when supplied at buy time
   name: string | null;
   marketHashName: string | null;
   type: string | null;
@@ -3599,7 +3644,7 @@ interface Trade {
   status: TradeStatus;
   game: string;                // "730"
   items: TradeItem[];
-  summary: { total: number; completed: number; failed: number };
+  summary: { total: number; delivered: number; completed: number; failed: number };
   totalPrice: number;
   currency: Currency;
   holdEndDate?: string;
@@ -3621,6 +3666,7 @@ interface BuyItem {
   listingId?: string;          // from MarketListing.id
   listingRawId?: string;       // raw listing id
   maxPrice: string;            // decimal string
+  externalId?: string;         // your own per-item ref; distinct per request, accepted by cancel
 }
 
 interface BuyBody {
@@ -3645,6 +3691,7 @@ interface QuickBuyBody {
   phase?: DopplerPhase;        // EcoSteam-only; cannot combine with delivery: "instant"
   tradeUrl?: string;
   externalId?: string;
+  externalIds?: string[];      // one ref per unit, in order; exactly `amount` entries, distinct
 }
 
 interface QuickBuyResponse {
@@ -3657,9 +3704,22 @@ interface QuickBuyResponse {
 }
 
 interface CancelItemResponse {
-  ok: true;
   itemId: string;
   status: "cancelled" | "failed";
+}
+
+// POST /market/transactions/{tradeId}/cancel — best-effort over every cancellable item.
+interface CancelTradeResponse {
+  tradeId: string;
+  requested: number;        // items still cancellable, and therefore attempted
+  cancelled: number;
+  failed: number;
+  items: Array<{
+    itemId: string;
+    externalId?: string;
+    status: "cancelled" | "failed";
+    reason?: string;        // stable error key when refused, e.g. "TRADE_CANCEL_TOO_SOON"
+  }>;
 }
 ```
 
@@ -5144,16 +5204,39 @@ Look up a trade by its id or your `externalId`. Pass a single ref to get one `Tr
 status poll — that returns an **array** of the trades that resolve (missing refs are
 omitted, no 404). Comma is the delimiter, so ids containing a comma can't be looked up here.
 
-## Websocket
-
 ### POST /market/transactions/{tradeId}/items/{itemId}/cancel
 
 **Cancel transaction item**
 
 **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
 
-Best-effort — marketplace must still accept the cancellation. The
+Best-effort — the supplier must still accept the cancellation. The
 response `status` field reflects whether the cancel succeeded.
+
+`tradeId` is the trade id or your `externalId`. `itemId` is `TradeItem.id` or your own
+per-item `externalId`.
+
+An item can only be cancelled while it is `initiated` or `pending`, once the order has
+been placed upstream, and no earlier than 30 minutes after it was created — before that
+you get `TRADE_CANCEL_TOO_SOON` (2041) carrying `cancellableAt`. Items already delivered
+or in flight to Steam, and items on supplier lanes that do not support cancellation,
+return `TRADE_NOT_CANCELLABLE` (2040).
+
+## Websocket
+
+### POST /market/transactions/{tradeId}/cancel
+
+**Cancel transaction**
+
+**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+Cancels every still-cancellable item in the trade. `tradeId` is the trade id or your
+`externalId`.
+
+Best-effort, and never all-or-nothing: items the supplier refuses are reported in
+`items[]` with a `reason`, and the request still returns `200`. Items already past the
+cancellable window are not attempted at all, so `requested` counts only the candidates.
+The same preconditions as the per-item cancel apply to each item.
 
 ### POST /auth/ws-token
 
