@@ -5069,7 +5069,7 @@ markets the item is currently listed on.
 
 Live cross-marketplace offers for an item, dispatched to marketplace
 workers. `market` filters by marketplace index (`0` = all, `3` = C5Game,
-`4` = EcoSteam, `6` = YouPin; `1` = Steam is sell-only and rejected here).
+`4` = EcoSteam, `6` = LIS-SKINS; `1` = Steam is sell-only and rejected here).
 `delivery` filters by delivery mode (`instant` = auto-deliver only); omit
 for both. For Doppler knives, optionally filter by `phase`. For
 float-relevant items, pass `wearMin` + `wearMax` together (both required

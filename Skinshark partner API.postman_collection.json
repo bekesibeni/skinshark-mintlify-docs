@@ -15081,7 +15081,7 @@
                                             "request": {
                                                 "name": "List item listings",
                                                 "description": {
-                                                    "content": "**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**\n\nLive cross-marketplace offers for an item, dispatched to marketplace\nworkers. `market` filters by marketplace index (`0` = all, `3` = C5Game,\n`4` = EcoSteam, `6` = YouPin; `1` = Steam is sell-only and rejected here).\n`delivery` filters by delivery mode (`instant` = auto-deliver only); omit\nfor both. For Doppler knives, optionally filter by `phase`. For\nfloat-relevant items, pass `wearMin` + `wearMax` together (both required\nif either is sent).\n\nListing ids are opaque and ephemeral; the market index is encoded inside\nthem. Ids minted before the v0.4.x market-index remap are invalidated —\nalways re-read listings before buying rather than caching ids.\n",
+                                                    "content": "**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**\n\nLive cross-marketplace offers for an item, dispatched to marketplace\nworkers. `market` filters by marketplace index (`0` = all, `3` = C5Game,\n`4` = EcoSteam, `6` = LIS-SKINS; `1` = Steam is sell-only and rejected here).\n`delivery` filters by delivery mode (`instant` = auto-deliver only); omit\nfor both. For Doppler knives, optionally filter by `phase`. For\nfloat-relevant items, pass `wearMin` + `wearMax` together (both required\nif either is sent).\n\nListing ids are opaque and ephemeral; the market index is encoded inside\nthem. Ids minted before the v0.4.x market-index remap are invalidated —\nalways re-read listings before buying rather than caching ids.\n",
                                                     "type": "text/plain"
                                                 },
                                                 "url": {
@@ -15116,7 +15116,7 @@
                                                         {
                                                             "disabled": false,
                                                             "description": {
-                                                                "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 YouPin (1 Steam is sell-only, rejected).",
+                                                                "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 LIS-SKINS (1 Steam is sell-only, rejected).",
                                                                 "type": "text/plain"
                                                             },
                                                             "key": "market",
@@ -15228,7 +15228,7 @@
                                                                 {
                                                                     "disabled": false,
                                                                     "description": {
-                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 YouPin (1 Steam is sell-only, rejected).",
+                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 LIS-SKINS (1 Steam is sell-only, rejected).",
                                                                         "type": "text/plain"
                                                                     },
                                                                     "key": "market",
@@ -15358,7 +15358,7 @@
                                                                 {
                                                                     "disabled": false,
                                                                     "description": {
-                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 YouPin (1 Steam is sell-only, rejected).",
+                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 LIS-SKINS (1 Steam is sell-only, rejected).",
                                                                         "type": "text/plain"
                                                                     },
                                                                     "key": "market",
@@ -15488,7 +15488,7 @@
                                                                 {
                                                                     "disabled": false,
                                                                     "description": {
-                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 YouPin (1 Steam is sell-only, rejected).",
+                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 LIS-SKINS (1 Steam is sell-only, rejected).",
                                                                         "type": "text/plain"
                                                                     },
                                                                     "key": "market",
@@ -15618,7 +15618,7 @@
                                                                 {
                                                                     "disabled": false,
                                                                     "description": {
-                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 YouPin (1 Steam is sell-only, rejected).",
+                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 LIS-SKINS (1 Steam is sell-only, rejected).",
                                                                         "type": "text/plain"
                                                                     },
                                                                     "key": "market",
@@ -15748,7 +15748,7 @@
                                                                 {
                                                                     "disabled": false,
                                                                     "description": {
-                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 YouPin (1 Steam is sell-only, rejected).",
+                                                                        "content": "Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 LIS-SKINS (1 Steam is sell-only, rejected).",
                                                                         "type": "text/plain"
                                                                     },
                                                                     "key": "market",
