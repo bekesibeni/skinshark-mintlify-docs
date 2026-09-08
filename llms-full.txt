@@ -1348,8 +1348,6 @@ on the presence of `idempotencyKey` to prevent double-charges.
 # Error handling
 Source: https://skinshark.gg/docs/guides/error-handling
 
-Retry policy, when to reconcile vs replay, and patterns for safely recovering from any failure mode.
-
 
 The API returns errors in the [response envelope](/guides/envelope), so
 your client throws a typed `SkinsharkError` for any non-2xx response.

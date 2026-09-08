@@ -1010,8 +1010,7 @@ components:
         name: { type: string }
         marketHashName: { type: string }
         phase:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: Phased items (Doppler / Gamma Doppler) return one entry per priced phase, each with that phase's own price. `id` is the item id — pass it with `phase` to `/market/listings/:itemId` or quick-buy. `null` for every other item.
         itemType: { type: string }
         iconUrl: { type: string }
