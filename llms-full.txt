@@ -1348,6 +1348,8 @@ on the presence of `idempotencyKey` to prevent double-charges.
 # Error handling
 Source: https://skinshark.gg/docs/guides/error-handling
 
+Retry policy, when to reconcile vs replay, and patterns for safely recovering from any failure mode.
+
 
 The API returns errors in the [response envelope](/guides/envelope), so
 your client throws a typed `SkinsharkError` for any non-2xx response.
@@ -3329,6 +3331,8 @@ the [WebSocket](/guides/websocket#reconnection) guide.
 
 # Data models
 Source: https://skinshark.gg/docs/reference/data-models
+
+TypeScript types for every shape returned by the API. Generated equivalents are available via openapi-typescript or the official SDK.
 
 
 These types mirror the OpenAPI `data` shapes — what's inside `body.data` on a
