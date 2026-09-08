@@ -242,7 +242,7 @@ On a `failed` item, `error` is one of:
 
 `canceled` and `declined` items carry no `error` code — the status *is* the
 outcome. An optional `errorDetail` string carries the raw marketplace reason
-(e.g. `"c5:ITEM_SOLD item already sold"`) for debugging only — treat it as
+(e.g. `"market:ITEM_SOLD item already sold"`) for debugging only — treat it as
 opaque and never branch on it.
 
 ## What to log

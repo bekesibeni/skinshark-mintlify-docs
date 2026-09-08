@@ -1590,7 +1590,7 @@ On a `failed` item, `error` is one of:
 
 `canceled` and `declined` items carry no `error` code — the status *is* the
 outcome. An optional `errorDetail` string carries the raw marketplace reason
-(e.g. `"c5:ITEM_SOLD item already sold"`) for debugging only — treat it as
+(e.g. `"market:ITEM_SOLD item already sold"`) for debugging only — treat it as
 opaque and never branch on it.
 
 ## What to log
@@ -3332,8 +3332,6 @@ the [WebSocket](/guides/websocket#reconnection) guide.
 # Data models
 Source: https://skinshark.gg/docs/reference/data-models
 
-TypeScript types for every shape returned by the API. Generated equivalents are available via openapi-typescript or the official SDK.
-
 
 These types mirror the OpenAPI `data` shapes — what's inside `body.data` on a
 successful envelope. Generate them with `openapi-typescript`
@@ -3628,9 +3626,9 @@ interface TradeItem {
 
 // Present only on refunded items (failed/canceled/declined/reverted). Buy trades only.
 interface ItemRefund {
-  amount: number;           // returned to the buyer
-  penalty: number;          // withheld on buyer fault, else 0
-  buyerFault: boolean;      // true when declined as the buyer's fault
+  amount: number;           // returned to the buyer; 0 when the user reverted the trade
+  penalty: number;          // withheld on buyer fault, else 0; the whole price on a user revert
+  buyerFault: boolean;      // true when declined as the buyer's fault or reverted by the user
 }
 
 interface Trade {
@@ -3688,7 +3686,7 @@ interface QuickBuyBody {
   maxPrice: string;
   amount: number;              // 1–200
   delivery: DeliveryMode;
-  phase?: DopplerPhase;        // EcoSteam-only; cannot combine with delivery: "instant"
+  phase?: DopplerPhase;        // Doppler / Gamma Doppler only; combines with either delivery mode
   tradeUrl?: string;
   externalId?: string;
   externalIds?: string[];      // one ref per unit, in order; exactly `amount` entries, distinct
@@ -3814,7 +3812,7 @@ interface SearchResultItem {
   collection?: string;
   floatRange?: [number, number];
   // Both fee-applied. standard = overall lowest (manual); instant = auto-deliver
-  // floor (C5 today), null when none. Omitted when no market price.
+  // floor, null when none. Omitted when no market price.
   price?: { standard: number; instant: number | null };
   listingsCount?: number;
   steamPrice?: number;
@@ -3830,17 +3828,20 @@ interface SearchResponse {
 
 interface MarketListing {
   id: string;
-  marketHashName: string;
+  assetId: string | null;    // Steam asset id — catalog/listing reads only, not on trades/webhooks
+  classId: string | null;
+  instanceId: string | null;
+  price: number;
+  referencePrice: number | null;
   name: string;
+  marketHashName: string;
   type: string;
   iconUrl: string;
-  price: number;
-  referencePrice?: number;
   exterior?: string;
   rarity?: string;
   collection?: string;
   color?: string;
-  wear?: number | null;
+  wear?: string | null;      // float value as a string
   paintSeed?: number | null;
   doppler?: { status: number; name: string; paintIndex?: number };
   fade?: { percentage: number };
@@ -3858,8 +3859,9 @@ interface MarketListing {
     pattern?: string;
     iconUrl: string;
   };
-  inspectUrl?: string;
-  assetId?: string;          // Steam asset id — catalog/listing reads only, not on trades/webhooks
+  // bare hex inspect token; rebuild as
+  // steam://run/730//+csgo_econ_action_preview%20{previewToken}
+  previewToken: string | null;
   delivery?: string;
 }
 
@@ -4665,9 +4667,12 @@ all-time totals. `bySubUser` is the top 10 by GMV in the window.
 
 **Auth context:** merchant only. **Rate limit: 100/min.**
 
-At least one of `email` or `steamId` is required. `externalId` is your
-own stable identifier and can be used in subsequent calls (path params,
-`On-Behalf-Of`).
+`steamId` is required and is what identifies a sub-user: it must be unique
+within your account, and a second create with the same SteamID64 is rejected
+with `STEAM_ID_TAKEN`. The same SteamID64 may exist under another merchant —
+uniqueness is scoped to you, never global. `email` is optional and may be
+shared by several of your sub-users. `externalId` is your own stable
+identifier and can be used in subsequent calls (path params, `On-Behalf-Of`).
 
 New sub-users inherit the merchant's `feeBps` (per-merchant default,
 falling back to the global default).
@@ -4801,8 +4806,7 @@ Discord link (if connected), wallet snapshot.
 
 Server resolves the SteamID and persona via Steam — request can fail with
 `TRADEURL_INVALID_TOKEN` (1413) if the trade URL is invalid, expired, or the
-Steam profile / inventory is private. `TRADEURL_ESCROW` (1414) if the account
-has trade hold enabled.
+Steam profile / inventory is private.
 
 ### PATCH /user/settings/tradeurls/{id}
 
@@ -5027,7 +5031,9 @@ deposit so a user can finish paying after closing the original session.
 **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
 
 Page-paginated. Returns canonical items (not listings) — to see live
-offers for an item, hit `/market/listings/:itemId`.
+offers for an item, hit `/market/listings/:itemId`. Phased items (Doppler /
+Gamma Doppler) come back as one entry per priced phase — same `id`, distinct
+`phase`, each priced at its own floor — so key entries on `id + phase`.
 
 ### GET /market/prices
 
@@ -5035,20 +5041,18 @@ offers for an item, hit `/market/listings/:itemId`.
 
 **Auth context:** merchant only. `On-Behalf-Of` rejected.
 
-Page-paginated catalog feed of per-item floors: `instant` (C5 auto-deliver)
-and `standard` (the cheapest live listing, the same value `/market/search`
-returns). Either may be `null` when the item has no matching live listing —
-`null` means "nothing listed", not zero. Prices are decimal USD dollars
-(2dp), never cents. Pass `limit=-1` to return the whole catalog in one
+Page-paginated catalog feed of per-item floors: `instant` (auto-deliver) and
+`standard` (the cheapest live listing, the same value `/market/search` returns).
+Both are after the caller's fee by default. Either may be `null` when the item
+has no matching live listing. Pass `limit=-1` to return the whole catalog in one
 response (no pagination).
 
-By default both tiers blend every priced market and include your fee. Use
-`market` to restrict to one marketplace and `includeFees=false` to get the
-raw sourcing price instead.
+Use `includeFees=false` to get raw sourcing prices with no house or merchant
+fee applied.
 
-`standard` and `phases` are sourced separately, so `standard` is **not**
-guaranteed to equal the cheapest phase — a phased item can carry a `phases`
-entry below its own `standard`.
+Only supply that can currently fill an order is quoted, so a price is never
+returned that `/market/buy` would refuse. When nothing can fill an order the
+floor is `null` rather than stale.
 
 ## Listings
 
@@ -5067,17 +5071,14 @@ markets the item is currently listed on.
 
 **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
 
-Live cross-marketplace offers for an item, dispatched to marketplace
-workers. `market` filters by marketplace index (`0` = all, `3` = C5Game,
-`4` = EcoSteam, `6` = LIS-SKINS; `1` = Steam is sell-only and rejected here).
-`delivery` filters by delivery mode (`instant` = auto-deliver only); omit
+Live offers for an item, aggregated across every source that can fill an
+order. `delivery` filters by delivery mode (`instant` = auto-deliver only); omit
 for both. For Doppler knives, optionally filter by `phase`. For
 float-relevant items, pass `wearMin` + `wearMax` together (both required
 if either is sent).
 
-Listing ids are opaque and ephemeral; the market index is encoded inside
-them. Ids minted before the v0.4.x market-index remap are invalidated —
-always re-read listings before buying rather than caching ids.
+Listing ids are opaque and ephemeral. Ids minted before the v0.4.x remap are
+invalidated — always re-read listings before buying rather than caching ids.
 
 ### GET /market/listings/{listingId}
 
@@ -5087,8 +5088,6 @@ always re-read listings before buying rather than caching ids.
 
 Used to refresh the latest price/availability on a listing the sub-user
 is about to buy.
-
-## Trading
 
 ### GET /market
 
@@ -5120,6 +5119,10 @@ above `maxPrice` between catalog read and purchase, that item fails.
 Sub-user wallet is debited synchronously by `totalPrice` (escrowed); the
 Trade then runs through marketplace workers. Subscribe to `trade.*` WS
 events for status updates.
+
+A listing whose marketplace is disabled or offline is rejected with
+`MARKET_UNAVAILABLE` before the wallet is touched — the whole request fails and
+nothing is escrowed, so no item is left waiting on a worker that isn't running.
 
 Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
 `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
@@ -5244,10 +5247,8 @@ The same preconditions as the per-item cancel apply to each item.
 
 **Auth context:** sub-user — `On-Behalf-Of` required.
 
-Returns a 1-hour JWT scoped to `[deposit, trade, market]`. Pass it as
-the `?token=` query string when opening `wss://api.skinshark.gg/ws`
-(deposit + trade events) or `wss://api.skinshark.gg/market/live` (the
-`market` scope — live-market feed).
+Returns a 1-hour JWT scoped to `[deposit, trade]`. Pass it as the
+`?token=` query string when opening `wss://api.skinshark.gg/ws`.
 
 Tokens are bound to the sub-user resolved from `On-Behalf-Of` — the
 WebSocket only receives events for that user. To watch multiple
@@ -5320,7 +5321,7 @@ Open with
 
 - `scope=watchlist` — deltas for the curated live market (the same feed
   served by `GET /market`).
-- `scope=all` (default) — the full C5 firehose: every market event,
+- `scope=all` (default) — the full market firehose: every market event,
   transformed to our format but not DB-enriched. Uncached, WS-only.
 
 **Read-only.** Any client → server frame closes the socket with code
