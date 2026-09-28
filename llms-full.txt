@@ -1572,10 +1572,10 @@ the trade's terminal `status`:
 | `completed` | Items delivered, hold released. | — |
 | `failed` | Couldn't be placed/delivered. Each item's `error` carries a `TradeFailureCode`. | Full |
 | `canceled` | Canceled before delivery (by the platform, or by the user while still `pending`). | Full |
-| `declined` | Buyer's fault after the Steam offer went out (declined / let it expire). | Full minus a 2% penalty |
+| `declined` | Buyer's fault after the Steam offer went out (declined / let it expire). Each item's `error` says why. | Full minus a 2% penalty |
 | `reverted` | Delivered, then recalled by the supplier. | Full |
 
-On a `failed` item, `error` is one of:
+On a `failed` or `declined` item, `error` is one of:
 
 | `TradeFailureCode` | Meaning | What to do |
 |---|---|---|
@@ -1585,10 +1585,11 @@ On a `failed` item, `error` is one of:
 | `TRADE_URL_INVALID` | Buyer's Steam trade URL is invalid or expired. | Fix the user's trade URL. |
 | `STEAM_ACCOUNT_RESTRICTED` | Buyer's Steam account can't receive trades (VAC/ban/family view/private). | User fixes their Steam account. |
 | `BUYER_TRADE_RESTRICTED` | The marketplace suspended this buyer, e.g. for repeated trade-offer no-shows — usually until a stated time. | User accepts their pending offers; retrying sooner cannot succeed. |
+| `OFFER_NOT_ACCEPTED` | The Steam offer reached the buyer and they declined, countered or let it expire. Usually on a `declined` item. | User accepts the offer next time; buy again. |
 | `MARKET_UNAVAILABLE` | Temporary upstream / our-side issue. | Retry later. |
 | `PURCHASE_FAILED` | Unexpected / unmapped failure. | Reconcile, then retry or surface. |
 
-`canceled` and `declined` items carry no `error` code — the status *is* the
+`canceled` items carry no `error` code — the status *is* the
 outcome. An optional `errorDetail` string carries the raw marketplace reason
 (e.g. `"market:ITEM_SOLD item already sold"`) for debugging only — treat it as
 opaque and never branch on it.
@@ -2677,6 +2678,21 @@ Trade lifecycle:
 - `trade.settled` — fee/earnings ledger postings completed (paired with `trade.completed`).
 - `trade.refunded` — full or partial refund posted to the user wallet; carries a per-item `refund` block (amount refunded + any buyer-fault penalty, in USD).
 
+Item lifecycle (multi-item buy trades only):
+
+- `item.pending`, `item.active`, `item.hold`, `item.completed`, `item.failed`, `item.canceled`, `item.declined`, `item.reverted`
+
+A trade's status is a rollup of its items (any item on hold puts the trade on hold), so on a
+multi-item trade an item can move without the trade status changing, and no `trade.*` event
+fires. Each `item.*` event reports one item's move. The Steam offers of a multi-item trade are
+announced here: read `item.offerId` (the item's own offer) and link the buyer to it. Items
+delivered together share one offer id. If an item's offer is re-sent, you get its current
+`item.*` event again with the new `offerId`. Single-item trades send no `item.*` events; their
+`trade.*` events already say the same thing, and there `trade.offerId` is set.
+
+Sells never send `item.*` events. A sell is one Steam offer, so all its items move together
+and every `trade.*` event carries each item's current status and `offerId`.
+
 Deposit lifecycle:
 
 - `deposit.initiated`
@@ -2782,6 +2798,10 @@ interface WebhookEnvelope {
           refunded: number;             // returned to the wallet (sourcing + fee)
           penalty: number;              // withheld on buyer fault, else 0
         };
+      }
+    | {
+        item: TradeItem & { previousStatus: TradeStatus | null };  // item.* events
+        trade: Omit<Trade, 'items'>;
       }
     | { deposit: Deposit }
     | {
@@ -3364,7 +3384,7 @@ type TradeStatus =
   | "declined"
   | "reverted";
 
-// Set on a trade item's `error` when its `status` is `failed`.
+// Set on a trade item's `error` when its `status` is `failed` or `declined`.
 type TradeFailureCode =
   | "LISTING_UNAVAILABLE"
   | "NO_LISTING_AT_PRICE"
@@ -3372,6 +3392,7 @@ type TradeFailureCode =
   | "TRADE_URL_INVALID"
   | "STEAM_ACCOUNT_RESTRICTED"
   | "BUYER_TRADE_RESTRICTED"
+  | "OFFER_NOT_ACCEPTED"
   | "MARKET_UNAVAILABLE"
   | "PURCHASE_FAILED";
 
@@ -3621,7 +3642,8 @@ interface TradeItem {
   delivery?: string;
   status: TradeStatus;
   tradable: boolean;
-  error?: TradeFailureCode; // set when status is "failed"
+  offerId?: string;         // Steam offer carrying this item; latest if re-sent. Shared by items sent together
+  error?: TradeFailureCode; // set when status is "failed" or "declined"
   errorDetail?: string;     // raw marketplace reason, debug only — opaque
   refund?: ItemRefund;      // present only on refunded buy items; amount + penalty === price
 }
@@ -3639,7 +3661,7 @@ interface Trade {
   userId: string;
   steamId: string;
   tradeUrl: string;
-  offerId?: string;
+  offerId?: string;            // single-item trades only; multi-item: read items[].offerId
   externalId?: string;
   status: TradeStatus;
   game: string;                // "730"
