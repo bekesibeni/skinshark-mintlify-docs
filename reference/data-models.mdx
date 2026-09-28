@@ -32,7 +32,7 @@ type TradeStatus =
   | "declined"
   | "reverted";
 
-// Set on a trade item's `error` when its `status` is `failed`.
+// Set on a trade item's `error` when its `status` is `failed` or `declined`.
 type TradeFailureCode =
   | "LISTING_UNAVAILABLE"
   | "NO_LISTING_AT_PRICE"
@@ -40,6 +40,7 @@ type TradeFailureCode =
   | "TRADE_URL_INVALID"
   | "STEAM_ACCOUNT_RESTRICTED"
   | "BUYER_TRADE_RESTRICTED"
+  | "OFFER_NOT_ACCEPTED"
   | "MARKET_UNAVAILABLE"
   | "PURCHASE_FAILED";
 
@@ -289,7 +290,8 @@ interface TradeItem {
   delivery?: string;
   status: TradeStatus;
   tradable: boolean;
-  error?: TradeFailureCode; // set when status is "failed"
+  offerId?: string;         // Steam offer carrying this item; latest if re-sent. Shared by items sent together
+  error?: TradeFailureCode; // set when status is "failed" or "declined"
   errorDetail?: string;     // raw marketplace reason, debug only — opaque
   refund?: ItemRefund;      // present only on refunded buy items; amount + penalty === price
 }
@@ -307,7 +309,7 @@ interface Trade {
   userId: string;
   steamId: string;
   tradeUrl: string;
-  offerId?: string;
+  offerId?: string;            // single-item trades only; multi-item: read items[].offerId
   externalId?: string;
   status: TradeStatus;
   game: string;                // "730"

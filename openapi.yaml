@@ -1389,18 +1389,25 @@ components:
         delivery: { type: string }
         status: { $ref: '#/components/schemas/TradeStatus' }
         tradable: { type: boolean }
+        offerId:
+          type: string
+          description: >-
+            Steam trade offer carrying this item, once one is sent. Items delivered together share one offer;
+            a multi-item trade can arrive as several. If the offer is re-sent, this is the latest one.
         error:
           type: string
-          enum: [LISTING_UNAVAILABLE, NO_LISTING_AT_PRICE, PRICE_CHANGED, TRADE_URL_INVALID, STEAM_ACCOUNT_RESTRICTED, BUYER_TRADE_RESTRICTED, MARKET_UNAVAILABLE, PURCHASE_FAILED]
+          enum: [LISTING_UNAVAILABLE, NO_LISTING_AT_PRICE, PRICE_CHANGED, TRADE_URL_INVALID, STEAM_ACCOUNT_RESTRICTED, BUYER_TRADE_RESTRICTED, OFFER_NOT_ACCEPTED, MARKET_UNAVAILABLE, PURCHASE_FAILED]
           description: |
-            Set when the item `status` is `failed`. Stable partner-facing code:
+            Set when the item `status` is `failed` or `declined`. Stable partner-facing code:
             `LISTING_UNAVAILABLE` (the listing sold/was delisted — retry another listing),
             `NO_LISTING_AT_PRICE` (nothing on sale at or below your max — re-quote higher or wait for restock),
             `PRICE_CHANGED` (price moved above your max), `TRADE_URL_INVALID` (buyer's Steam trade URL is invalid),
             `STEAM_ACCOUNT_RESTRICTED` (buyer's Steam account can't trade),
             `BUYER_TRADE_RESTRICTED` (the marketplace suspended this buyer, e.g. for repeated trade-offer no-shows,
-            usually until a stated time — retrying sooner cannot succeed), `MARKET_UNAVAILABLE` (temporary upstream/our-side
-            issue — retry later), `PURCHASE_FAILED` (unexpected). `canceled`/`declined` items carry no code; the status is the outcome.
+            usually until a stated time — retrying sooner cannot succeed), `OFFER_NOT_ACCEPTED` (the Steam offer reached the
+            buyer and they declined, countered or let it expire — usually on a `declined` item; buy again),
+            `MARKET_UNAVAILABLE` (temporary upstream/our-side issue — retry later), `PURCHASE_FAILED` (unexpected).
+            `canceled` items carry no code; the status is the outcome.
         errorDetail:
           type: string
           description: 'Raw marketplace reason for debugging (e.g. "market:ITEM_SOLD item already sold"). Not stable — do not branch on it.'
@@ -1426,7 +1433,11 @@ components:
         userId: { type: string }
         steamId: { type: string }
         tradeUrl: { type: string }
-        offerId: { type: string }
+        offerId:
+          type: string
+          description: >-
+            Steam trade offer of a single-item trade. Omitted on multi-item trades, which can span several
+            offers: read `items[].offerId` there.
         externalId: { type: string }
         status: { $ref: '#/components/schemas/TradeStatus' }
         game: { type: string, example: "730" }
@@ -1575,7 +1586,7 @@ components:
 
     SellPricesResponse:
       type: array
-      description: Skinbolt payout book — what we pay per item.
+      description: Payout book — what we pay per item.
       items: { $ref: '#/components/schemas/SellPrice' }
 
     SellItem:

@@ -38,6 +38,21 @@ Trade lifecycle:
 - `trade.settled` — fee/earnings ledger postings completed (paired with `trade.completed`).
 - `trade.refunded` — full or partial refund posted to the user wallet; carries a per-item `refund` block (amount refunded + any buyer-fault penalty, in USD).
 
+Item lifecycle (multi-item buy trades only):
+
+- `item.pending`, `item.active`, `item.hold`, `item.completed`, `item.failed`, `item.canceled`, `item.declined`, `item.reverted`
+
+A trade's status is a rollup of its items (any item on hold puts the trade on hold), so on a
+multi-item trade an item can move without the trade status changing, and no `trade.*` event
+fires. Each `item.*` event reports one item's move. The Steam offers of a multi-item trade are
+announced here: read `item.offerId` (the item's own offer) and link the buyer to it. Items
+delivered together share one offer id. If an item's offer is re-sent, you get its current
+`item.*` event again with the new `offerId`. Single-item trades send no `item.*` events; their
+`trade.*` events already say the same thing, and there `trade.offerId` is set.
+
+Sells never send `item.*` events. A sell is one Steam offer, so all its items move together
+and every `trade.*` event carries each item's current status and `offerId`.
+
 Deposit lifecycle:
 
 - `deposit.initiated`
@@ -143,6 +158,10 @@ interface WebhookEnvelope {
           refunded: number;             // returned to the wallet (sourcing + fee)
           penalty: number;              // withheld on buyer fault, else 0
         };
+      }
+    | {
+        item: TradeItem & { previousStatus: TradeStatus | null };  // item.* events
+        trade: Omit<Trade, 'items'>;
       }
     | { deposit: Deposit }
     | {
