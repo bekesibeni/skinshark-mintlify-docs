@@ -189,7 +189,7 @@ snapshot. If this works, your key + IP allowlist + role are all good.
 const profile = await api<{
   id: string;
   email: string;
-  merchantFeeBps: number;
+  buyFeeBps: number;
   wallets: { spot: { currency: string; balance: number } | null };
 }>("/merchant");
 
@@ -1987,8 +1987,9 @@ Your merchant has two wallets:
 
 - **`spot`** — what you fund customers from, what direct merchant trades
   debit.
-- **`earnings`** — credited at trade settlement when your `merchantFeeBps`
-  > 0. This is your cut on customer purchases.
+- **`earnings`** — credited at trade settlement when your `buyFeeBps`
+  > 0 (your cut on customer purchases), and when a customer's sell completes
+  while your `sellFeeBps` > 0 (your cut on their payout).
 
 ```ts
 const merchant = await api<{
@@ -2608,7 +2609,7 @@ export async function call<P extends keyof paths, M extends Method>(
 
 ```ts
 const profile = await call("get", "/merchant");
-//    ^? { id: string; email: string; merchantFeeBps: number; ... }
+//    ^? { id: string; email: string; buyFeeBps: number; ... }
 
 const sub = await call("post", "/merchant/users", {
   body: { email: "alice@example.com", externalId: "user_42" },
@@ -3474,7 +3475,8 @@ interface MerchantProfile {
   twoFactorEnabled: boolean;
   twoFactorMethod: TwoFactorMethod | null;
   feeBps: number;             // house fee on merchant's own buys
-  merchantFeeBps: number;     // merchant's cut on sub-user trades
+  buyFeeBps: number;          // merchant's cut on sub-user buys
+  sellFeeBps: number;         // merchant's cut on sub-user sells, off the payout
   childDefaultFeeBps: number | null;
   wallets: {
     spot: { currency: string; balance: number } | null;
@@ -3484,7 +3486,8 @@ interface MerchantProfile {
 }
 
 interface FeesResponse {
-  merchantFeeBps: number;
+  buyFeeBps: number;
+  sellFeeBps: number;
   childDefaultFeeBps: number | null;
   globalDefaultFeeBps: number;
   effectiveChildFeeBps: number;
@@ -4661,7 +4664,7 @@ spot/earnings balances.
 
 **Auth context:** merchant only.
 
-Returns the merchant's `merchantFeeBps`, the per-merchant default house
+Returns the merchant's `buyFeeBps` and `sellFeeBps`, the per-merchant default house
 fee for new sub-users, the global default, and the resolved effective
 child fee (`childDefaultFeeBps ?? globalDefaultFeeBps`).
 
