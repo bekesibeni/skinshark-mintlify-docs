@@ -122,7 +122,8 @@ interface MerchantProfile {
   twoFactorEnabled: boolean;
   twoFactorMethod: TwoFactorMethod | null;
   feeBps: number;             // house fee on merchant's own buys
-  merchantFeeBps: number;     // merchant's cut on sub-user trades
+  buyFeeBps: number;          // merchant's cut on sub-user buys
+  sellFeeBps: number;         // merchant's cut on sub-user sells, off the payout
   childDefaultFeeBps: number | null;
   wallets: {
     spot: { currency: string; balance: number } | null;
@@ -132,7 +133,8 @@ interface MerchantProfile {
 }
 
 interface FeesResponse {
-  merchantFeeBps: number;
+  buyFeeBps: number;
+  sellFeeBps: number;
   childDefaultFeeBps: number | null;
   globalDefaultFeeBps: number;
   effectiveChildFeeBps: number;

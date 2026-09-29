@@ -175,7 +175,7 @@ export async function call<P extends keyof paths, M extends Method>(
 
 ```ts
 const profile = await call("get", "/merchant");
-//    ^? { id: string; email: string; merchantFeeBps: number; ... }
+//    ^? { id: string; email: string; buyFeeBps: number; ... }
 
 const sub = await call("post", "/merchant/users", {
   body: { email: "alice@example.com", externalId: "user_42" },

@@ -176,8 +176,9 @@ Your merchant has two wallets:
 
 - **`spot`** — what you fund customers from, what direct merchant trades
   debit.
-- **`earnings`** — credited at trade settlement when your `merchantFeeBps`
-  > 0. This is your cut on customer purchases.
+- **`earnings`** — credited at trade settlement when your `buyFeeBps`
+  > 0 (your cut on customer purchases), and when a customer's sell completes
+  while your `sellFeeBps` > 0 (your cut on their payout).
 
 ```ts
 const merchant = await api<{

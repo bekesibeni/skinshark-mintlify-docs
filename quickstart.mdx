@@ -67,7 +67,7 @@ snapshot. If this works, your key + IP allowlist + role are all good.
 const profile = await api<{
   id: string;
   email: string;
-  merchantFeeBps: number;
+  buyFeeBps: number;
   wallets: { spot: { currency: string; balance: number } | null };
 }>("/merchant");
 
