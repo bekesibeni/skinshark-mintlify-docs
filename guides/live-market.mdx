@@ -1,17 +1,18 @@
 ---
 title: "Live market"
-description: "A REST snapshot plus a WebSocket delta stream of the cheapest current listings, repriced for the viewer."
+description: "A REST snapshot of the cheapest current listings, plus a WebSocket that tells you when the listings you show sell or reprice."
 ---
 
 The live market is the set of cheapest current listings across connected
 marketplaces, kept warm and repriced for the viewer. It has two surfaces:
 
 - `GET /market` — a snapshot of the feed, cheapest first.
-- `GET /market/live` — a WebSocket that pushes price deltas in real time.
+- `GET /market/live` — a WebSocket that reports, in real time, when the
+  listings you show sell or change price.
 
-Use them together: load a snapshot, open the socket, then apply each delta
-on top of the snapshot. Prices on both surfaces already include the
-viewer's fee, so you render them as-is.
+Use them together: render from the snapshot, then watch the listings on
+screen so a sold one disappears before the user tries to buy it. Prices on
+both surfaces already include the viewer's fee, so you render them as-is.
 
 ## Snapshot
 
@@ -41,37 +42,38 @@ endpoints. See [Data models](/reference/data-models) for the full
 ## Live stream
 
 ```http
-wss://api.skinshark.gg/market/live?scope=watchlist
+wss://api.skinshark.gg/market/live?scope=watch
 ```
 
-The socket pushes a delta whenever a listing in scope appears, reprices,
-or is removed. It carries no snapshot of its own — pair it with
-`GET /market` to establish initial state.
+The socket tells you, within seconds, when a listing you care about sells,
+disappears or changes price. It has two scopes:
 
-### Scopes
-
-<ParamField query="scope" type="string" default="all">
-  `all` or `watchlist`.
+<ParamField query="scope" type="string" default="watch">
+  `watch` or `removals`.
 </ParamField>
 
-| Scope | Contents | Payload |
+| Scope | Who | Contents |
 |---|---|---|
-| `watchlist` | The curated feed `GET /market` returns | Full listing (icon, rarity, reference fields) |
-| `all` | Every listing event across the market (firehose) | Lighter — `type` and `iconUrl` are omitted; high volume |
+| `watch` | Any ticket | State and changes for the listing ids you send it |
+| `removals` | Merchant ticket only | Every listing that leaves the market, in batches every 250 ms |
 
-Pick `watchlist` to track the same set `GET /market` serves. Pick `all`
-only if you want the raw firehose and can absorb the volume.
+Use `watch` for a cart, a checkout page or an open listing view: send the
+ids on screen, get their state back immediately, then get a push the moment
+one of them sells or reprices. Use `removals` only if you serve the whole
+book yourself and need to drop sold listings from it; expect around 9 MB/h
+uncompressed, and enable `permessage-deflate` on your client.
 
 ## Authentication
 
 The live socket uses the same JWT ticket as the [WebSocket](/guides/websocket)
-event stream — the ticket carries a `market` scope alongside `deposit`
-and `trade`, so one ticket works for both sockets.
+event stream. Every ticket carries the `market` scope; a ticket minted by a
+merchant for itself (no `On-Behalf-Of`) also carries `market:merchant`, which
+unlocks `scope=removals` and a larger watch limit.
 
 <Steps>
   <Step title="Mint a ticket">
-    Call `POST /auth/ws-token` with `On-Behalf-Of` set to the sub-user
-    you're acting as.
+    Call `POST /auth/ws-token` — with `On-Behalf-Of` for an end user's
+    socket, without it for one your backend holds.
 
     ```ts
     const { token } = await api<{ token: string; expiresIn: string }>(
@@ -87,80 +89,98 @@ and `trade`, so one ticket works for both sockets.
 
     ```ts
     const ws = new WebSocket(
-      "wss://api.skinshark.gg/market/live?scope=watchlist",
+      "wss://api.skinshark.gg/market/live?scope=watch",
       [`bearer.${token}`],
     );
     ```
   </Step>
   <Step title="Wait for the ready frame">
-    On a successful upgrade the server sends:
-
     ```json
-    { "event": "market.ready", "data": { "scope": "watchlist" }, "ts": 1714678920000 }
+    { "event": "market.ready", "data": { "scope": "watch", "limit": 500 }, "ts": 1714678920000 }
     ```
+
+    `limit` is how many listing ids this socket may watch at once: 500 on an
+    end-user ticket, 20,000 on a merchant ticket.
   </Step>
 </Steps>
 
-## Protocol
+## Watching listings
 
-- **Read-only.** Sending any frame closes the socket with `4002 Read-only`.
-- **Heartbeats.** The server sends WS pings; reply with pongs (most
-  clients do this automatically).
-- **Frame shape.** Every push is `{ event, data, ts }`, where `ts` is Unix
-  epoch milliseconds.
+Send ids as JSON text frames. A frame is at most 32 KB, so split a large
+set into frames of a few hundred ids.
 
-## Events
+```json
+{ "op": "watch", "ids": ["0190f4c2-…", "0190f4c3-…"] }
+{ "op": "unwatch", "ids": ["0190f4c2-…"] }
+```
+
+Every `watch` frame is answered with the current state of each id in it,
+including ids you already watched:
+
+```json
+{
+  "event": "market.state",
+  "data": {
+    "listings": [
+      { "listingId": "0190f4c2-…", "alive": true, "price": 12.48, "delivery": "instant" },
+      { "listingId": "0190f4c3-…", "alive": false }
+    ]
+  },
+  "ts": 1714678920000
+}
+```
+
+`alive` is `false` when the listing sold, was delisted, is held by an
+order already in flight, or would be refused by `POST /market/buy`. `price`
+already includes the fee of the user the ticket was minted for.
+
+After that, changes arrive as they happen:
 
 ```ts
 type LiveEvent =
-  | { event: "market.ready"; data: { scope: "all" | "watchlist" }; ts: number }
-  | { event: "market.new"; data: MarketListing; ts: number }
-  | { event: "market.update"; data: MarketListing; ts: number }
-  | { event: "market.remove"; data: { listingId: string; itemId?: string }; ts: number };
+  | { event: "market.ready"; data: { scope: "watch" | "removals"; limit?: number }; ts: number }
+  | { event: "market.state"; data: { listings: ListingState[] }; ts: number }
+  | { event: "market.updated"; data: { listings: { listingId: string; price: number }[] }; ts: number }
+  | { event: "market.removed"; data: { listings: { listingId: string; itemId?: string }[] }; ts: number }
+  | { event: "market.error"; data: { key: "WATCH_LIMIT"; limit: number }; ts: number };
+
+type ListingState = {
+  listingId: string;
+  alive: boolean;
+  price?: number;
+  delivery?: "standard" | "instant";
+};
 ```
 
-Treat `market.new` and `market.update` identically — upsert the listing
-keyed by `data.id`. On `market.remove`, drop the listing by
-`data.listingId`.
+- `market.removed` — the listing is gone. A sale reaches you within about a
+  second; anything else that makes a listing unbuyable within about 5 seconds.
+- `market.updated` — the listing's price changed.
+- `market.error` with `WATCH_LIMIT` — the frame would have taken the socket
+  past its limit. Nothing in it was added; unwatch some ids and retry.
 
-```ts
-const listings = new Map<string, MarketListing>();
+A malformed frame closes the socket with `4002 Bad frame`. On a
+`removals` socket any frame closes it with `4002 Read-only`.
 
-ws.addEventListener("message", (raw) => {
-  const evt = JSON.parse(raw.data.toString()) as LiveEvent;
-  switch (evt.event) {
-    case "market.new":
-    case "market.update":
-      listings.set(evt.data.id, evt.data);
-      break;
-    case "market.remove":
-      listings.delete(evt.data.listingId);
-      break;
-  }
-});
-```
+## Reconnecting
 
-## Keeping a view in sync
-
-<Steps>
-  <Step title="Open the socket and buffer">
-    Open `scope=watchlist` and buffer deltas until the snapshot loads, so
-    nothing is lost in the gap.
-  </Step>
-  <Step title="Load the snapshot">
-    Page through `GET /market` into your map keyed by `id`.
-  </Step>
-  <Step title="Apply buffered and live deltas">
-    Replay the buffered deltas, then keep applying new ones. An update for
-    a listing you don't have is just an insert; a remove for one you don't
-    have is a no-op.
-  </Step>
-</Steps>
+The socket has no replay. After a reconnect, send your whole watch set
+again: the `market.state` answer tells you which listings died while you
+were away, so nothing else is needed to catch up.
 
 <Info>
-  Prices are snapshotted at connect time using the acting sub-user's fee
-  tier. A mid-session fee change takes effect on the next reconnect.
+  Prices are fixed to the fee tier at connect time. A fee change takes
+  effect on the next reconnect.
 </Info>
+
+## Buying a listing that just sold
+
+Even with the socket, a listing can sell between the user's click and the
+purchase. `POST /market/buy` answers `404 LISTING_NOT_FOUND` with
+`error.listingIds` naming exactly the dead ids, before any money moves. To
+have the purchase take the next copy instead, send
+`fallback: "same_item"` on the item: if the listing is gone by the time it
+is bought, the cheapest other listing of the same item, phase and delivery
+tier at or under your `maxPrice` is bought in its place.
 
 ## Close codes
 
@@ -168,10 +188,11 @@ ws.addEventListener("message", (raw) => {
 |---|---|---|
 | 4001 | Missing token | No ticket in the subprotocol or `?token=` |
 | 4001 | Invalid token | Bad signature, expired, or wrong purpose |
-| 4002 | Read-only | Client sent a frame after upgrade |
-| 4003 | Missing market scope | Ticket lacks the `market` scope |
+| 4002 | Bad frame | A `watch` socket got a frame that isn't a valid `watch`/`unwatch` |
+| 4002 | Read-only | A `removals` socket got any frame |
+| 4003 | Forbidden | Ticket lacks the `market` scope, or `scope=removals` on an end-user ticket |
 | 4008 | Too many connections | Over the per-user socket limit |
 
-A sub-user may hold up to 5 concurrent live sockets. For the reconnect
+A user may hold up to 5 concurrent live sockets. For the reconnect
 pattern (mint a fresh ticket on `4001`, back off on network blips), see
 the [WebSocket](/guides/websocket#reconnection) guide.

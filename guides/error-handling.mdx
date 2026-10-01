@@ -194,7 +194,7 @@ await withRetry(() =>
 
 | Key | Cause |
 |---|---|
-| `LISTING_NOT_FOUND` | Listing already sold or removed. |
+| `LISTING_NOT_FOUND` | Listing already sold or removed. On `/market/buy`, `error.listingIds` names exactly the dead ids. |
 | `PRICE_MISMATCH` | Listing price moved above `maxPrice`. Re-quote. |
 | `PRICE_BELOW_MINIMUM` | Quick-buy `maxPrice` below current minimum. |
 | `TRADEURL_REQUIRED` | Sub-user has no primary Steam trade URL set. |
@@ -239,6 +239,7 @@ On a `failed` or `declined` item, `error` is one of:
 | `BUYER_TRADE_RESTRICTED` | The marketplace suspended this buyer, e.g. for repeated trade-offer no-shows — usually until a stated time. | User accepts their pending offers; retrying sooner cannot succeed. |
 | `OFFER_NOT_ACCEPTED` | The Steam offer reached the buyer and they declined, countered or let it expire. Usually on a `declined` item. | User accepts the offer next time; buy again. |
 | `MARKET_UNAVAILABLE` | Temporary upstream / our-side issue. | Retry later. |
+| `SELLER_FAILED` | The purchase went through but the seller never delivered. | Buy again; another listing will usually succeed. |
 | `PURCHASE_FAILED` | Unexpected / unmapped failure. | Reconcile, then retry or surface. |
 
 `canceled` items carry no `error` code — the status *is* the
