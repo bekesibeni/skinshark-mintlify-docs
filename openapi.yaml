@@ -1412,9 +1412,10 @@ components:
             a multi-item trade can arrive as several. If the offer is re-sent, this is the latest one.
         error:
           type: string
-          enum: [LISTING_UNAVAILABLE, NO_LISTING_AT_PRICE, PRICE_CHANGED, TRADE_URL_INVALID, STEAM_ACCOUNT_RESTRICTED, BUYER_TRADE_RESTRICTED, OFFER_NOT_ACCEPTED, MARKET_UNAVAILABLE, SELLER_FAILED, PURCHASE_FAILED]
+          enum: [LISTING_UNAVAILABLE, NO_LISTING_AT_PRICE, PRICE_CHANGED, TRADE_URL_INVALID, STEAM_ACCOUNT_RESTRICTED, BUYER_TRADE_RESTRICTED, OFFER_NOT_ACCEPTED, MARKET_UNAVAILABLE, SELLER_FAILED, PURCHASE_FAILED, TRADE_OFFER_FAILED, USER_NOT_TRADEABLE, ESCROW_NOT_ALLOWED, INVENTORY_PRIVATE]
           description: |
-            Set when the item `status` is `failed` or `declined`. Stable partner-facing code:
+            Set when the item `status` is `failed` or `declined`, and on a `canceled` item whose cancel has a cause
+            (see below). Stable partner-facing code:
             `LISTING_UNAVAILABLE` (the listing sold/was delisted — retry another listing),
             `NO_LISTING_AT_PRICE` (nothing on sale at or below your max — re-quote higher or wait for restock),
             `PRICE_CHANGED` (price moved above your max), `TRADE_URL_INVALID` (buyer's Steam trade URL is invalid),
@@ -1425,7 +1426,12 @@ components:
             `MARKET_UNAVAILABLE` (temporary upstream/our-side issue — retry later),
             `SELLER_FAILED` (the purchase went through but the seller never delivered — buy again; another listing will usually succeed),
             `PURCHASE_FAILED` (unexpected).
-            `canceled` items carry no code; the status is the outcome.
+            A buy item the marketplace `canceled` on its own clock carries `OFFER_NOT_ACCEPTED` (the buyer did not
+            accept the offer in time) or `SELLER_FAILED` (the seller never sent it); both refund in full. A cancel you
+            made yourself carries no code.
+            Sell items use `TRADE_OFFER_FAILED` (we could not send the offer), `USER_NOT_TRADEABLE` (Steam would not let
+            us send the seller an offer), `ESCROW_NOT_ALLOWED` (the seller has a trade hold), `INVENTORY_PRIVATE`, and
+            `OFFER_NOT_ACCEPTED` on a `declined` sell or a `canceled` one (the seller did not accept within 30 minutes).
         errorDetail:
           type: string
           description: 'Raw marketplace reason for debugging (e.g. "market:ITEM_SOLD item already sold"). Not stable — do not branch on it.'
