@@ -3439,7 +3439,9 @@ paths:
         inventory is private or not open to incoming trades. Those are rejected with
         `422 LISTING_BUYER_INELIGIBLE` before the wallet is touched; `error.listingIds` names them
         and `error.reason` says why. With `fallback: "same_item"` they are bought from a listing
-        that can be delivered instead.
+        that can be delivered instead. Once an account has been refused this way, search, item
+        detail and item listings read for that user (`On-Behalf-Of`) leave such listings out
+        for a while, so they aren't offered again.
 
         Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
         `LISTING_BUYER_INELIGIBLE` (2013), `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
