@@ -2690,7 +2690,8 @@ fires. Each `item.*` event reports one item's move. The Steam offers of a multi-
 announced here: read `item.offerId` (the item's own offer) and link the buyer to it. Items
 delivered together share one offer id. If an item's offer is re-sent, you get its current
 `item.*` event again with the new `offerId`. Single-item trades send no `item.*` events; their
-`trade.*` events already say the same thing, and there `trade.offerId` is set.
+`trade.*` events already say the same thing, and there `trade.offerId` is set. It is also set on
+a multi-item trade once every item shares one offer.
 
 Sells never send `item.*` events. A sell is one Steam offer, so all its items move together
 and every `trade.*` event carries each item's current status and `offerId`.
@@ -4447,6 +4448,7 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 2010 | `ORDER_NOT_FOUND` | 404 | Trade ID or external ID doesn't exist in your scope. |
 | 2011 | `LISTING_NOT_FOUND` | 404 | Listing sold / removed since you fetched it. |
 | 2012 | `LISTING_DETAIL_FAILED` | 502 | Failed to fetch listing details from upstream. |
+| 2013 | `LISTING_BUYER_INELIGIBLE` | 422 | These listings can't be delivered to the buyer's Steam account. `listingIds` names them; `reason` is `trade_hold`, `inventory_private`, `inventory_unavailable` (CS2 inventory not open to incoming trades) or `restricted`. Nothing was charged. Pick other listings, or send `fallback: "same_item"` to buy the same item from a listing that can be delivered. Quick buys skip these listings automatically and return this error only when no other listing can serve the buyer. |
 | 2020 | `PRICE_MISMATCH` | 409 | Listing price drifted above your `maxPrice`. |
 | 2021 | `PRICE_BELOW_MINIMUM` | 422 | Quick-buy `maxPrice` below current minimum listing price. |
 | 2022 | `TRADEURL_REQUIRED` | 422 | Sub-user has no primary Steam trade URL set. |
@@ -5186,8 +5188,14 @@ the dead ids, so you can drop those and resubmit the rest. Set
 the cheapest copy of the same item at or under `maxPrice`. A repeat with the same
 `externalId` returns the first trade.
 
+Some listings can't be delivered to an account with a Steam trade hold, or whose CS2
+inventory is private or not open to incoming trades. Those are rejected with
+`422 LISTING_BUYER_INELIGIBLE` before the wallet is touched; `error.listingIds` names them
+and `error.reason` says why. With `fallback: "same_item"` they are bought from a listing
+that can be delivered instead.
+
 Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
-`PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
+`LISTING_BUYER_INELIGIBLE` (2013), `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
 Returns `503 SERVICE_DISABLED` when admin has paused trading.
 
 ## The sub-user hands cs2 items to a skinshark-operated steam bot and is paid
