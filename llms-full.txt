@@ -1590,10 +1590,18 @@ On a `failed` or `declined` item, `error` is one of:
 | `SELLER_FAILED` | The purchase went through but the seller never delivered. | Buy again; another listing will usually succeed. |
 | `PURCHASE_FAILED` | Unexpected / unmapped failure. | Reconcile, then retry or surface. |
 
-`canceled` items carry no `error` code — the status *is* the
-outcome. An optional `errorDetail` string carries the raw marketplace reason
+A buy item the marketplace `canceled` on its own clock carries `OFFER_NOT_ACCEPTED`
+(the buyer didn't accept in time) or `SELLER_FAILED` (the seller never sent it), and
+is refunded in full. A cancel you made yourself carries no code.
+
+Sell items use `TRADE_OFFER_FAILED` (we couldn't send the offer), `USER_NOT_TRADEABLE`
+(Steam won't let us send the seller an offer), `ESCROW_NOT_ALLOWED` (the seller has a
+trade hold), `INVENTORY_PRIVATE`, and `OFFER_NOT_ACCEPTED` when the seller declines or
+doesn't accept within 30 minutes.
+
+An optional `errorDetail` string carries the raw marketplace reason
 (e.g. `"market:ITEM_SOLD item already sold"`) for debugging only — treat it as
-opaque and never branch on it.
+opaque, never branch on it, and never show it to end users.
 
 ## What to log
 
