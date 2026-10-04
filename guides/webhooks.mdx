@@ -48,7 +48,8 @@ fires. Each `item.*` event reports one item's move. The Steam offers of a multi-
 announced here: read `item.offerId` (the item's own offer) and link the buyer to it. Items
 delivered together share one offer id. If an item's offer is re-sent, you get its current
 `item.*` event again with the new `offerId`. Single-item trades send no `item.*` events; their
-`trade.*` events already say the same thing, and there `trade.offerId` is set.
+`trade.*` events already say the same thing, and there `trade.offerId` is set. It is also set on
+a multi-item trade once every item shares one offer.
 
 Sells never send `item.*` events. A sell is one Steam offer, so all its items move together
 and every `trade.*` event carries each item's current status and `offerId`.

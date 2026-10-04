@@ -1454,8 +1454,9 @@ components:
         offerId:
           type: string
           description: >-
-            Steam trade offer of a single-item trade. Omitted on multi-item trades, which can span several
-            offers: read `items[].offerId` there.
+            Steam trade offer that carries every item of the trade: always on a single-item trade, and on
+            a multi-item trade whose items share one offer (a sell, or a buy filled in one offer).
+            Omitted while items sit on different offers or some have none yet: read `items[].offerId`.
         externalId: { type: string }
         status: { $ref: '#/components/schemas/TradeStatus' }
         game: { type: string, example: "730" }
