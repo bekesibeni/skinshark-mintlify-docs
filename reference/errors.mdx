@@ -257,6 +257,7 @@ the trade-URL codes `1415`–`1417`.
 | 2107 | `NO_OFFER_FOUND` | 422 | No payout offer is available for one or more of these items. |
 | 2108 | `ITEMS_NOT_ACCEPTED` | 422 | One or more items aren't in the inventory or aren't tradable. |
 | 2109 | `PRICING_UNAVAILABLE` | 503 | Payout pricing is temporarily unavailable. Retry shortly. |
+| 2115 | `SELL_CAPACITY_EXHAUSTED` | 503 | Selling is paused: we can't take in more items right now. Not transient; retrying won't help until capacity returns. |
 
 ## Validation error shape
 

@@ -1230,6 +1230,12 @@ components:
             `steam://run/730//+csgo_econ_action_preview%20{previewToken}`.
             Null when the marketplace supplied no link and one could not be synthesized.
         delivery: { type: string }
+        quickBuyable:
+          type: boolean
+          description: >-
+            On `GET /market/items/{itemId}/listings` rows. False when no quick buy would take this row (it is priced
+            far under every other market and has almost always sold already), so a quick-buy `maxPrice` copied
+            from it is refused with `PRICE_BELOW_MINIMUM`. The row can still be bought by its `id`.
 
     ListingsResponse:
       type: object
@@ -1435,6 +1441,14 @@ components:
         errorDetail:
           type: string
           description: 'Raw marketplace reason for debugging (e.g. "market:ITEM_SOLD item already sold"). Not stable — do not branch on it.'
+        minPrice:
+          type: number
+          description: |
+            Quick buys only. Set on a `failed` item whose book moved above your `maxPrice` before it filled
+            (`NO_LISTING_AT_PRICE`, `LISTING_UNAVAILABLE` or `PRICE_CHANGED`): the fee-inclusive USD price a
+            quick buy for the same item would have to bid when it failed, the same figure a synchronous
+            `PRICE_BELOW_MINIMUM` returns as `error.minPrice`. Absent when your bid still cleared (the listing
+            was simply taken first) or no market quoted the item.
         refund:
           type: object
           description: |
@@ -1511,17 +1525,26 @@ components:
       required: [itemId, status]
       properties:
         itemId: { type: string }
-        status: { type: string, enum: [cancelled, failed] }
+        status:
+          type: string
+          enum: [cancelled, cancel_requested, failed]
+          description: |
+            `cancel_requested`: the supplier only took a request the seller may still beat by
+            delivering. The item stays `pending` and refunds in full once the seller's side
+            cancels; watch `trade.*` events for which way it went.
 
     CancelTradeResponse:
       type: object
-      required: [tradeId, requested, cancelled, failed, items]
+      required: [tradeId, requested, cancelled, cancelRequested, failed, items]
       properties:
         tradeId: { type: string }
         requested:
           type: integer
           description: Items that were still cancellable and therefore attempted.
         cancelled: { type: integer }
+        cancelRequested:
+          type: integer
+          description: Items whose cancel is only a request so far (see `CancelItemResponse.status`).
         failed: { type: integer }
         items:
           type: array
@@ -1531,7 +1554,7 @@ components:
             properties:
               itemId: { type: string }
               externalId: { type: string }
-              status: { type: string, enum: [cancelled, failed] }
+              status: { type: string, enum: [cancelled, cancel_requested, failed] }
               reason:
                 type: string
                 description: Stable error key when the cancel was refused, e.g. `TRADE_CANCEL_TOO_SOON`.
@@ -3354,7 +3377,10 @@ paths:
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
         Used to refresh the latest price/availability on a listing the sub-user
-        is about to buy.
+        is about to buy. A listing that cannot be delivered to the sub-user's Steam
+        account (the same screen `POST /market/buy` applies) answers
+        `LISTING_BUYER_INELIGIBLE` (422) with `listingIds` and `reason`: pick another
+        listing.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
         - { name: listingId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3440,6 +3466,11 @@ paths:
         `items[].fallback: "same_item"` to have a listing that dies after this check replaced by
         the cheapest copy of the same item at or under `maxPrice`. A repeat with the same
         `externalId` returns the first trade.
+
+        A `maxPrice` below what a listing currently costs (fees included) is rejected with
+        `409 PRICE_MISMATCH` before the wallet is touched; `error.listingIds` names those
+        listings and `error.minPrices` maps each to the lowest `maxPrice` that buys it. Items with
+        `fallback: "same_item"` are not checked here: they fall back instead.
 
         Some listings can't be delivered to an account with a Steam trade hold, or whose CS2
         inventory is private or not open to incoming trades. Those are rejected with
@@ -3563,6 +3594,10 @@ paths:
         tradable — only accepted items can be sold. Send each item's `id` + exact
         `price` to `POST /market/sell`. Pass `refresh=true` to bypass the inventory
         cache. Requires a linked Steam account (`STEAM_ACCOUNT_REQUIRED` otherwise).
+        If Steam reports the account cannot trade (trade ban, cooldown, restriction), every
+        item comes back `tradable: false` and `accepted: false`, and a sell answers
+        `USER_NOT_TRADEABLE` before any offer is sent. While we cannot take in more items,
+        every item comes back `accepted: false` and a sell answers `SELL_CAPACITY_EXHAUSTED`.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
         - { name: tradeUrl, in: query, schema: { type: string, format: uri }, description: Optional; must belong to the user's linked Steam account. }
@@ -3607,7 +3642,8 @@ paths:
         Common error keys: `STEAM_ACCOUNT_REQUIRED` (1417), `USER_NOT_TRADEABLE` (2101),
         `INVENTORY_PRIVATE` (2102), `ESCROW_NOT_ALLOWED` (2105), `NO_OFFER_FOUND` (2107),
         `ITEMS_NOT_ACCEPTED` (2108), `PRICE_MISMATCH` (2020), `DUPLICATE_LISTING_ID` (2023),
-        `NO_BOTS_AVAILABLE` (2100), `PRICING_UNAVAILABLE` (2109), `TRADE_LIMIT_EXCEEDED`.
+        `NO_BOTS_AVAILABLE` (2100), `SELL_CAPACITY_EXHAUSTED` (2115), `PRICING_UNAVAILABLE` (2109),
+        `TRADE_LIMIT_EXCEEDED`.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
       requestBody:
@@ -3715,7 +3751,10 @@ paths:
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
 
         Best-effort — the supplier must still accept the cancellation. The
-        response `status` field reflects whether the cancel succeeded.
+        response `status` field reflects whether the cancel succeeded. On some P2P items the
+        supplier only takes a request: `status` is `cancel_requested`, the item stays
+        `pending`, and it refunds in full once the seller's side cancels (the seller may still
+        deliver first).
 
         `tradeId` is the trade id or your `externalId`. `itemId` is `TradeItem.id` or your own
         per-item `externalId`.

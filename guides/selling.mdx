@@ -129,3 +129,4 @@ Beyond the shared [error codes](/reference/errors), selling can return:
 | `ITEMS_NOT_ACCEPTED` | An item isn't in the inventory or isn't tradable. |
 | `PRICE_MISMATCH` | A submitted price no longer matches the live quote — re-read and retry. |
 | `NO_BOTS_AVAILABLE` / `PRICING_UNAVAILABLE` / `STEAM_UNAVAILABLE` | Transient — retry shortly. |
+| `SELL_CAPACITY_EXHAUSTED` | We can't take in more items for now. Not transient: retrying won't help until capacity returns, and inventory items show `accepted: false` meanwhile. |
