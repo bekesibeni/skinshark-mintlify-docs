@@ -2955,6 +2955,8 @@ export function verifySkinSharkSignature(
 - Failed deliveries (non-2xx, timeout, network error) retry on a fixed
   schedule — **11 attempts total** spread over ~14¾ hours per event:
   30s, 30s, 5m, 5m, 15m, 15m, 1h, 1h, 6h, 6h.
+- Once your endpoint answers 2xx again after failing, its other waiting
+  retries are sent right away instead of waiting out their backoff.
 - After 11 attempts, the delivery is marked `exhausted` — no further
   retries for that event.
 - The same `webhook-id` is reused on every retry of the same event.
@@ -4485,6 +4487,7 @@ the trade-URL codes `1415`–`1417`.
 | 2107 | `NO_OFFER_FOUND` | 422 | No payout offer is available for one or more of these items. |
 | 2108 | `ITEMS_NOT_ACCEPTED` | 422 | One or more items aren't in the inventory or aren't tradable. |
 | 2109 | `PRICING_UNAVAILABLE` | 503 | Payout pricing is temporarily unavailable. Retry shortly. |
+| 2115 | `SELL_CAPACITY_EXHAUSTED` | 503 | Selling is paused: we can't take in more items right now. Not transient; retrying won't help until capacity returns. |
 
 ## Validation error shape
 
@@ -5152,7 +5155,10 @@ invalidated — always re-read listings before buying rather than caching ids.
 **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
 
 Used to refresh the latest price/availability on a listing the sub-user
-is about to buy.
+is about to buy. A listing that cannot be delivered to the sub-user's Steam
+account (the same screen `POST /market/buy` applies) answers
+`LISTING_BUYER_INELIGIBLE` (422) with `listingIds` and `reason`: pick another
+listing.
 
 ### GET /market
 
@@ -5195,6 +5201,11 @@ the dead ids, so you can drop those and resubmit the rest. Set
 `items[].fallback: "same_item"` to have a listing that dies after this check replaced by
 the cheapest copy of the same item at or under `maxPrice`. A repeat with the same
 `externalId` returns the first trade.
+
+A `maxPrice` below what a listing currently costs (fees included) is rejected with
+`409 PRICE_MISMATCH` before the wallet is touched; `error.listingIds` names those
+listings and `error.minPrices` maps each to the lowest `maxPrice` that buys it. Items with
+`fallback: "same_item"` are not checked here: they fall back instead.
 
 Some listings can't be delivered to an account with a Steam trade hold, or whose CS2
 inventory is private or not open to incoming trades. Those are rejected with
@@ -5242,6 +5253,10 @@ is our USD offer; `accepted` is true only when a quote exists AND the item is
 tradable — only accepted items can be sold. Send each item's `id` + exact
 `price` to `POST /market/sell`. Pass `refresh=true` to bypass the inventory
 cache. Requires a linked Steam account (`STEAM_ACCOUNT_REQUIRED` otherwise).
+If Steam reports the account cannot trade (trade ban, cooldown, restriction), every
+item comes back `tradable: false` and `accepted: false`, and a sell answers
+`USER_NOT_TRADEABLE` before any offer is sent. While we cannot take in more items,
+every item comes back `accepted: false` and a sell answers `SELL_CAPACITY_EXHAUSTED`.
 
 ### POST /market/sell
 
@@ -5265,7 +5280,8 @@ saved trade URL. Subscribe to `trade.*` WS events for status updates.
 Common error keys: `STEAM_ACCOUNT_REQUIRED` (1417), `USER_NOT_TRADEABLE` (2101),
 `INVENTORY_PRIVATE` (2102), `ESCROW_NOT_ALLOWED` (2105), `NO_OFFER_FOUND` (2107),
 `ITEMS_NOT_ACCEPTED` (2108), `PRICE_MISMATCH` (2020), `DUPLICATE_LISTING_ID` (2023),
-`NO_BOTS_AVAILABLE` (2100), `PRICING_UNAVAILABLE` (2109), `TRADE_LIMIT_EXCEEDED`.
+`NO_BOTS_AVAILABLE` (2100), `SELL_CAPACITY_EXHAUSTED` (2115), `PRICING_UNAVAILABLE` (2109),
+`TRADE_LIMIT_EXCEEDED`.
 
 ### GET /market/transactions
 
@@ -5294,7 +5310,10 @@ omitted, no 404). Comma is the delimiter, so ids containing a comma can't be loo
 **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
 
 Best-effort — the supplier must still accept the cancellation. The
-response `status` field reflects whether the cancel succeeded.
+response `status` field reflects whether the cancel succeeded. On some P2P items the
+supplier only takes a request: `status` is `cancel_requested`, the item stays
+`pending`, and it refunds in full once the seller's side cancels (the seller may still
+deliver first).
 
 `tradeId` is the trade id or your `externalId`. `itemId` is `TradeItem.id` or your own
 per-item `externalId`.
