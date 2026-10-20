@@ -227,18 +227,20 @@ components:
     TwoFactorMethod: { type: string, enum: [email, totp] }
     WalletType:
       type: string
-      enum: [spot, earnings]
+      enum: [spot, earnings, vat]
       description: |
         - `spot` — funds available to spend or fund sub-users.
         - `earnings` — merchant-only treasury wallet credited at trade settlement.
+        - `vat` — merchant-only; VAT withheld from its sub-users' crypto deposits.
     WalletStatus: { type: string, enum: [active, suspended, closed] }
     TradeStatus:
       type: string
       enum: [initiated, pending, active, hold, completed, failed, canceled, declined, reverted]
       description: |
         Terminal outcomes — `completed` (delivered), `failed` (couldn't be placed/delivered; see item `error`),
-        `canceled` (canceled before delivery — full refund, no penalty), `declined` (buyer-fault decline after the
-        Steam offer was sent — refund minus a 2% penalty), `reverted` (delivered then recalled by the supplier).
+        `canceled` (canceled before delivery — full refund), `declined` (the buyer declined or let the Steam offer
+        expire — full refund), `reverted` (delivered, then rolled back; the trade's `revertedBy` says by whom). A
+        seller revert refunds in full; a buyer revert refunds the listing's `revertRefundPercent` of the price.
     TradeType:
       type: string
       enum: [buy, sell]
@@ -658,6 +660,32 @@ components:
     # ─────────────────────────────────────────────────────────────────────
     # Deposits — Self-hosted EVM crypto
     # ─────────────────────────────────────────────────────────────────────
+    CryptoVatDeclarationBody:
+      type: object
+      additionalProperties: false
+      required: [vatBps]
+      properties:
+        vatBps:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: VAT rate in basis points (2550 = 25.5%). 0 = no VAT.
+        vatCountry:
+          type: string
+          pattern: '^[A-Za-z]{2}$'
+          description: ISO 3166-1 alpha-2 country the rate belongs to. Omit for outside the EU.
+    CryptoVatDeclarationResponse:
+      allOf:
+        - $ref: '#/components/schemas/CryptoAddressResponse'
+        - type: object
+          required: [vat]
+          properties:
+            vat:
+              type: object
+              required: [bps, country]
+              properties:
+                bps: { type: integer }
+                country: { type: [string, "null"] }
     CryptoAddressResponse:
       type: object
       required: [address, chains, tokens]
@@ -1230,6 +1258,13 @@ components:
             `steam://run/730//+csgo_econ_action_preview%20{previewToken}`.
             Null when the marketplace supplied no link and one could not be synthesized.
         delivery: { type: string }
+        revertRefundPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            Share of the price refunded if the buyer rolls the trade back after delivery (a seller rollback always
+            refunds in full). Absent when the market does not say for this listing.
         quickBuyable:
           type: boolean
           description: >-
@@ -1449,17 +1484,13 @@ components:
             quick buy for the same item would have to bid when it failed, the same figure a synchronous
             `PRICE_BELOW_MINIMUM` returns as `error.minPrice`. Absent when your bid still cleared (the listing
             was simply taken first) or no market quoted the item.
-        refund:
-          type: object
+        refundAmount:
+          type: number
           description: |
             Present only on refunded items (status `failed`/`canceled`/`declined`/`reverted`), carried on every
-            trade snapshot and webhook. `amount + penalty == price`. On a buyer-fault `declined` a 2% penalty is
-            withheld; otherwise `penalty` is 0 and `amount` equals `price`. Buy trades only — sell items never carry it.
-          required: [amount, penalty, buyerFault]
-          properties:
-            amount: { type: number, description: Returned to the buyer. }
-            penalty: { type: number, description: "Withheld on buyer fault, else 0." }
-            buyerFault: { type: boolean, description: True when the item was declined as the buyer's fault. }
+            trade snapshot and webhook: what was returned to your balance, in the trade currency. It equals `price`
+            on everything except a buyer revert after delivery (`reverted` with `revertedBy: user`), which returns
+            the share the listing's `revertRefundPercent` named, possibly 0. Buy trades only — sell items never carry it.
 
     Trade:
       type: object
@@ -2805,6 +2836,39 @@ paths:
                       data: { $ref: '#/components/schemas/CryptoAddressResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: declareCryptoDepositVat
+      tags: [Deposits]
+      summary: Declare VAT and get crypto deposit address
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        Returns the same address as the GET and records a VAT declaration on it. Every
+        deposit detected after the call is split by the newest declaration: the fee comes off
+        first, then the VAT inside the rest (VAT-inclusive) moves to the merchant's `vat`
+        wallet. The deposit carries `vatBps`, `vatCountry` and `vatCents`; the user is
+        credited `amountCents - feeCents - vatCents`. A deposit already detected keeps the rate
+        it was detected under. An address that never declared credits in full.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CryptoVatDeclarationBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CryptoVatDeclarationResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /user/wallet/deposit/crypto/quote:
     post:

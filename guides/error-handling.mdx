@@ -224,8 +224,8 @@ the trade's terminal `status`:
 | `completed` | Items delivered, hold released. | — |
 | `failed` | Couldn't be placed/delivered. Each item's `error` carries a `TradeFailureCode`. | Full |
 | `canceled` | Canceled before delivery (by the platform, or by the user while still `pending`). | Full |
-| `declined` | Buyer's fault after the Steam offer went out (declined / let it expire). Each item's `error` says why. | Full minus a 2% penalty |
-| `reverted` | Delivered, then recalled by the supplier. | Full |
+| `declined` | The buyer declined the Steam offer or let it expire. Each item's `error` says why. | Full |
+| `reverted` | Delivered, then rolled back; the trade's `revertedBy` says by whom. | Full on a seller revert; the listing's `revertRefundPercent` of the price on a buyer revert |
 
 On a `failed` or `declined` item, `error` is one of:
 

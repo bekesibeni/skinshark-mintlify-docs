@@ -296,14 +296,10 @@ interface TradeItem {
   offerId?: string;         // Steam offer carrying this item; latest if re-sent. Shared by items sent together
   error?: TradeFailureCode; // set when status is "failed" or "declined"
   errorDetail?: string;     // raw marketplace reason, debug only — opaque
-  refund?: ItemRefund;      // present only on refunded buy items; amount + penalty === price
-}
-
-// Present only on refunded items (failed/canceled/declined/reverted). Buy trades only.
-interface ItemRefund {
-  amount: number;           // returned to the buyer; 0 when the user reverted the trade
-  penalty: number;          // withheld on buyer fault, else 0; the whole price on a user revert
-  buyerFault: boolean;      // true when declined as the buyer's fault or reverted by the user
+  // Refunded buy items only (failed/canceled/declined/reverted): returned to your balance, in the
+  // trade currency. Equals price except on a buyer revert (revertedBy "user"), where it is the
+  // listing's revertRefundPercent share, possibly 0. Sell items never carry it.
+  refundAmount?: number;
 }
 
 interface Trade {
@@ -538,6 +534,9 @@ interface MarketListing {
   // steam://run/730//+csgo_econ_action_preview%20{previewToken}
   previewToken: string | null;
   delivery?: string;
+  // 0–100: share of the price refunded if the buyer rolls the trade back after delivery
+  // (a seller rollback always refunds in full). Absent when the market does not say.
+  revertRefundPercent?: number;
 }
 
 // /market/items/{itemId}/listings
