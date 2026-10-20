@@ -1572,8 +1572,8 @@ the trade's terminal `status`:
 | `completed` | Items delivered, hold released. | — |
 | `failed` | Couldn't be placed/delivered. Each item's `error` carries a `TradeFailureCode`. | Full |
 | `canceled` | Canceled before delivery (by the platform, or by the user while still `pending`). | Full |
-| `declined` | Buyer's fault after the Steam offer went out (declined / let it expire). Each item's `error` says why. | Full minus a 2% penalty |
-| `reverted` | Delivered, then recalled by the supplier. | Full |
+| `declined` | The buyer declined the Steam offer or let it expire. Each item's `error` says why. | Full |
+| `reverted` | Delivered, then rolled back; the trade's `revertedBy` says by whom. | Full on a seller revert; the listing's `revertRefundPercent` of the price on a buyer revert |
 
 On a `failed` or `declined` item, `error` is one of:
 
@@ -1753,7 +1753,7 @@ with `cancellableAt`. Anything already delivered or in flight to Steam is `TRADE
 
 Both are best-effort. The trade-level call returns `200` even when some items are refused, with
 a per-item `status` and `reason`, so check the body rather than the status code. A successful
-cancel refunds in full with no penalty, and the money arrives asynchronously via
+cancel refunds in full, and the money arrives asynchronously via
 `trade.refunded` — the response only confirms the supplier accepted.
 
 ## Code template
@@ -2682,11 +2682,11 @@ Trade lifecycle:
 - `trade.hold` — items received, holding for the dispute window.
 - `trade.completed` — hold released, trade settled.
 - `trade.failed` — couldn't be placed/delivered (insufficient supply, marketplace decline, etc.). Each item's `error` carries a `TradeFailureCode`; user fully refunded.
-- `trade.canceled` — canceled before delivery (by the platform, or by the user while still `pending`); user fully refunded, no penalty.
-- `trade.declined` — buyer's fault after the Steam offer went out (declined or let it expire); user refunded minus a 2% penalty.
-- `trade.reverted` — items recalled or refunded after the marketplace accepted.
+- `trade.canceled` — canceled before delivery (by the platform, or by the user while still `pending`); user fully refunded.
+- `trade.declined` — the buyer declined the Steam offer or let it expire; user fully refunded.
+- `trade.reverted` — delivered, then rolled back; the trade's `revertedBy` says by whom. A seller revert refunds in full; a buyer revert refunds the listing's `revertRefundPercent` of the price.
 - `trade.settled` — fee/earnings ledger postings completed (paired with `trade.completed`).
-- `trade.refunded` — full or partial refund posted to the user wallet; carries a per-item `refund` block (amount refunded + any buyer-fault penalty, in USD).
+- `trade.refunded` — refund posted to the user wallet; carries a per-item `refund` block with the `refundAmount` returned, in the trade currency.
 
 Item lifecycle (multi-item buy trades only):
 
@@ -2802,12 +2802,10 @@ interface WebhookEnvelope {
     | {
         trade: Trade;                   // same shape as GET /merchant/trades/{id}
         settlement?: { houseFeeCents: number; merchantFeeCents: number };
-        refund?: {                      // trade.refunded — per refunded item, USD
+        refund?: {                      // trade.refunded — one per refunded item
           itemId: string;               // matches TradeItem.id
           externalId?: string;          // your own per-item ref, when you supplied one
-          buyerFault: boolean;
-          refunded: number;             // returned to the wallet (sourcing + fee)
-          penalty: number;              // withheld on buyer fault, else 0
+          refundAmount: number;         // returned to the wallet, trade currency; the item price except on a buyer revert
         };
       }
     | {
@@ -2830,14 +2828,15 @@ detail endpoint — `id`, `status`, `currency`, `totalPrice`, full
 `items` array, etc. The `items` array reflects the trade's state at
 event-delivery time, including each item's price, marketplace,
 delivery mode, status, and display metadata as it becomes available.
-Each refunded item also carries an inline `refund` breakdown (`amount`,
-`penalty`, `buyerFault`, with `amount + penalty == price`) on the item
-itself — present on **every** trade event once the item is refunded, so
-prefer it over the top-level `refund` block when reconciling.
+Each refunded item also carries its `refundAmount` on the item itself —
+present on **every** trade event once the item is refunded, so prefer it
+over the top-level `refund` block when reconciling. It equals the item
+`price` except on a buyer revert after delivery, where it is the listing's
+`revertRefundPercent` share (possibly 0).
 Settlement events (`trade.settled`, `trade.completed`) additionally
 include the fee breakdown. `trade.refunded` events additionally include a
-`refund` block — the per-item breakdown of how much went back to the
-wallet (`refunded`) and any buyer-fault `penalty` withheld, both in USD.
+`refund` block — the `refundAmount` that went back to the wallet for
+that item, in the trade currency.
 One `trade.refunded` is emitted per refunded item; match it to the item
 via `refund.itemId`. Deposit events carry a serialised deposit (gateway
 or self-hosted crypto fields, depending on method).
@@ -3682,14 +3681,10 @@ interface TradeItem {
   offerId?: string;         // Steam offer carrying this item; latest if re-sent. Shared by items sent together
   error?: TradeFailureCode; // set when status is "failed" or "declined"
   errorDetail?: string;     // raw marketplace reason, debug only — opaque
-  refund?: ItemRefund;      // present only on refunded buy items; amount + penalty === price
-}
-
-// Present only on refunded items (failed/canceled/declined/reverted). Buy trades only.
-interface ItemRefund {
-  amount: number;           // returned to the buyer; 0 when the user reverted the trade
-  penalty: number;          // withheld on buyer fault, else 0; the whole price on a user revert
-  buyerFault: boolean;      // true when declined as the buyer's fault or reverted by the user
+  // Refunded buy items only (failed/canceled/declined/reverted): returned to your balance, in the
+  // trade currency. Equals price except on a buyer revert (revertedBy "user"), where it is the
+  // listing's revertRefundPercent share, possibly 0. Sell items never carry it.
+  refundAmount?: number;
 }
 
 interface Trade {
@@ -3924,6 +3919,9 @@ interface MarketListing {
   // steam://run/730//+csgo_econ_action_preview%20{previewToken}
   previewToken: string | null;
   delivery?: string;
+  // 0–100: share of the price refunded if the buyer rolls the trade back after delivery
+  // (a seller rollback always refunds in full). Absent when the market does not say.
+  revertRefundPercent?: number;
 }
 
 // /market/items/{itemId}/listings
@@ -4952,6 +4950,19 @@ Same EVM address across all supported chains; idempotent (the address is
 provisioned on first call and cached). Listed `tokens` are accepted at
 launch — sending other ERC-20s will result in `deposit.failed` with
 reason `unsupported_token`.
+
+### POST /user/wallet/deposit/crypto/address
+
+**Declare VAT and get crypto deposit address**
+
+**Auth context:** sub-user — `On-Behalf-Of` required.
+
+Returns the same address as the GET and records a VAT declaration on it. Every
+deposit detected after the call is split by the newest declaration: the fee comes off
+first, then the VAT inside the rest (VAT-inclusive) moves to the merchant's `vat`
+wallet. The deposit carries `vatBps`, `vatCountry` and `vatCents`; the user is
+credited `amountCents - feeCents - vatCents`. A deposit already detected keeps the rate
+it was detected under. An address that never declared credits in full.
 
 ## Partner crypto payout custody
 
