@@ -30,14 +30,13 @@ Each request deducts from the bucket according to its cost class:
 | Class | Cost | Endpoints |
 |---|---|---|
 | Cheap | 1 | All routes by default — reads, profile, settings, normal writes, sub-user CRUD, etc. |
-| Expensive | 5 | The five worker-fanout / external-API endpoints listed below. |
+| Expensive | 5 | The six endpoints listed below. |
 
-The expensive endpoints — these dispatch to marketplace workers or hit
-external-marketplace APIs, so each call costs 5 tokens against your
-tier budget:
+The expensive endpoints cost 5 tokens each against your tier budget:
 
 | Method | Path |
 |---|---|
+| `GET` | `/market/export` |
 | `GET` | `/market/items/{itemId}/listings` |
 | `GET` | `/market/listings/{listingId}` |
 | `POST` | `/market/buy` |

@@ -225,6 +225,8 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 2000 | `MARKET_UNAVAILABLE` | 503 | No marketplace workers healthy. Retry once after 30s. |
 | 2001 | `MARKET_TIMEOUT` | 504 | Marketplace worker did not respond in time. |
 | 2002 | `WORKER_LOW_BALANCE` | 503 | Marketplace worker has insufficient balance to settle. |
+| 2005 | `MARKET_DATA_NOT_ENABLED` | 403 | The [market export](/guides/market-export) is not enabled for this merchant. |
+| 2006 | `EXPORT_NOT_READY` | 503 | The market export build for your price tier is not there yet (for example, just after a new epoch). Retry shortly. |
 | 2010 | `ORDER_NOT_FOUND` | 404 | Trade ID or external ID doesn't exist in your scope. |
 | 2011 | `LISTING_NOT_FOUND` | 404 | Listing sold / removed since you fetched it. |
 | 2012 | `LISTING_DETAIL_FAILED` | 502 | Failed to fetch listing details from upstream. |

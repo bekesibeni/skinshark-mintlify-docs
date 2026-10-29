@@ -20,6 +20,7 @@ const PAGES = [
   'guides/webhooks.mdx',
   'guides/websocket.mdx',
   'guides/live-market.mdx',
+  'guides/market-export.mdx',
   'reference/data-models.mdx',
   'reference/errors.mdx',
   'reference/rate-limits.mdx',

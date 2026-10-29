@@ -1282,6 +1282,71 @@ components:
         total: { type: integer }
 
     # ─────────────────────────────────────────────────────────────────────
+    # Market export & stream
+    # ─────────────────────────────────────────────────────────────────────
+    BookShardLink:
+      type: object
+      required: [url, rows, bytes, sha256]
+      description: |
+        One gzipped NDJSON shard of a build. Price shards hold
+        `[id, itemId, phase, price, instant]` lines; detail shards hold
+        `[id, detail]` lines. Check `sha256` and `rows` after downloading.
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Short-lived signed download link. Expires at the response's `expiresAt`.
+        rows: { type: integer, minimum: 0, description: Lines in the shard once gunzipped. }
+        bytes: { type: integer, minimum: 0, description: Size of the download (gzipped). }
+        sha256:
+          type: string
+          description: Hex SHA-256 of the downloaded (gzipped) bytes.
+          example: 3f1c9b0e5a7d2c8e4b6f0a1d9e3c7b5a2f8d6e4c0b9a7f5e3d1c8b6a4f2e0d9c
+
+    BookExportResponse:
+      type: object
+      required: [epoch, seq, builtAt, listings, feeBps, level, prices, detail, expiresAt, stream]
+      properties:
+        epoch:
+          type: string
+          description: Book epoch the build belongs to. Resume the stream with this and `seq`.
+          example: '1761746400000'
+        seq:
+          type: integer
+          minimum: 0
+          description: Frame sequence the build is current as of. Pass it as `since` when subscribing.
+        builtAt: { type: string, format: date-time }
+        listings: { type: integer, minimum: 0, description: Listings in the build. }
+        feeBps:
+          type: integer
+          minimum: 0
+          description: Fee (basis points) already included in every price in the build.
+        level:
+          type: string
+          enum: [minimal, extended, full]
+          description: Detail level of your entitlement.
+        prices:
+          type: array
+          items: { $ref: '#/components/schemas/BookShardLink' }
+          description: Price shards, split by item. Download all of them.
+        detail:
+          type: [array, "null"]
+          items: { $ref: '#/components/schemas/BookShardLink' }
+          description: Detail shards for your level, split by item the same way. `null` at `minimal`.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the shard links stop working (about 10 minutes after the call).
+        stream:
+          type: object
+          required: [path, encodings]
+          properties:
+            path: { type: string, example: /market/stream }
+            encodings:
+              type: array
+              items: { type: string, enum: [json, msgpack] }
+
+    # ─────────────────────────────────────────────────────────────────────
     # Trades
     # ─────────────────────────────────────────────────────────────────────
     BuyItem:
@@ -3502,6 +3567,80 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/export:
+    get:
+      operationId: getBookExport
+      tags: [Market]
+      summary: Market export
+      description: |
+        **Auth context:** merchant only. `On-Behalf-Of` rejected. Requires the
+        market-data entitlement, enabled per merchant by SkinShark.
+
+        Returns signed links to the latest build of the market export: the
+        full-depth, deduplicated book of every buyable listing, one listing per
+        physical item, priced for your account (prices already include your
+        fee). Each listing `id` can be passed straight to `/market/buy`.
+
+        A build is 16 gzipped NDJSON `prices` shards, split by item, plus the
+        `detail` shards for your level (`null` at `minimal`). Download them in
+        parallel, check each shard's `sha256` (hex of the gzipped bytes) and
+        `rows`, then gunzip. The links expire at `expiresAt`, about 10 minutes
+        after the call. A new build lands about every 5 minutes.
+
+        - Price line: `[id, itemId, phase, price, instant]` — `price` is a
+          decimal string in USD (`"12.34"`), `instant` is `1` or `0`.
+        - Detail line: `[id, detail]` — join to prices by `id`; listings with
+          no detail are omitted. `extended`: `wear`, `seed`, `paintIndex`,
+          `stickers`. `full` adds `assetId`, `inspect`, `revertRefundPercent`.
+
+        The build is the whole book as of (`epoch`, `seq`). Keep it current by
+        subscribing to `wss://stream.skinshark.gg/market/stream` with
+        `epoch` and `since: seq`.
+
+        The response carries an `ETag`. Send it back as `If-None-Match` to get
+        `304 Not Modified` with no body while the build is unchanged.
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: The `ETag` of a previous response.
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              description: Identifies the build, your price tier and your level.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/BookExportResponse' }
+        '304':
+          description: Not Modified — the build matching `If-None-Match` is still current. No body.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            `MARKET_DATA_NOT_ENABLED` (2005) — market data is not enabled for
+            this account. `FORBIDDEN` — the caller is not a merchant, or
+            `On-Behalf-Of` was set. Any other key in the shared `Forbidden` set
+            may also apply.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503':
+          description: |
+            `EXPORT_NOT_READY` (2006) — the build for your price tier is not
+            there yet (for example, for a minute after a new epoch). Retry shortly.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
 
   /market/buy:
     post:

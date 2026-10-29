@@ -25,6 +25,7 @@ Base URL: `https://api.skinshark.gg` (staging: `https://api-staging.skinshark.gg
 - [Webhooks](https://skinshark.gg/docs/guides/webhooks): Signed event deliveries, signatures, and the retry schedule.
 - [WebSocket](https://skinshark.gg/docs/guides/websocket): The `/ws` event stream, ticket auth, and reconnection.
 - [Live market](https://skinshark.gg/docs/guides/live-market): The `GET /market` snapshot paired with the `/market/live` delta stream.
+- [Market export & stream](https://skinshark.gg/docs/guides/market-export): The full-depth book as a `GET /market/export` build plus the sequenced `/market/stream` change feed.
 
 ## Integration guides
 
@@ -36,7 +37,7 @@ Base URL: `https://api.skinshark.gg` (staging: `https://api-staging.skinshark.gg
 ## API reference
 
 - [OpenAPI specification](https://skinshark.gg/docs/openapi.yaml): The full machine-readable spec — every endpoint, parameter, schema, and error.
-- Market: Search items, Search suggestions, List item prices, Get item, List item listings, Get listing, Live market snapshot, Buy listings, Quick buy, Sell prices, Sell inventory, Sell items, List/Get transactions (filter by `type` buy/sell; batch-lookup up to 100 refs comma-separated), Cancel transaction item.
+- Market: Search items, Search suggestions, List item prices, Get item, List item listings, Get listing, Live market snapshot, Market export, Buy listings, Quick buy, Sell prices, Sell inventory, Sell items, List/Get transactions (filter by `type` buy/sell; batch-lookup up to 100 refs comma-separated), Cancel transaction item.
 - Users: List/Create/Get/Delete sub-users, Suspend, Reactivate, Fund sub-user wallet, and per-sub-user wallet, ledger, and trades.
 - Account: Get merchant profile, fee configuration, account statistics, merchant balance, and merchant ledger.
 - Wallet & deposits: Wallet balance and ledger; Gate Pay, card on-ramp, and crypto deposit quote/create; Cancel/Resume deposit.

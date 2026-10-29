@@ -52,7 +52,8 @@
             "pages": [
               "guides/webhooks",
               "guides/websocket",
-              "guides/live-market"
+              "guides/live-market",
+              "guides/market-export"
             ]
           },
           {
