@@ -3382,6 +3382,372 @@ pattern (mint a fresh ticket on `4001`, back off on network blips), see
 the [WebSocket](/guides/websocket#reconnection) guide.
 
 
+# Market export & stream
+Source: https://skinshark.gg/docs/guides/market-export
+
+Every SkinShark listing as a downloadable build, kept current by a sequenced WebSocket of one-second change frames.
+
+
+The market export is the full-depth, deduplicated SkinShark market: every
+buyable listing, one listing per physical item, priced for your account.
+Prices already include your fee, so you serve them as-is, and every listing
+`id` can be passed straight to `POST /market/buy`.
+
+It has two surfaces that share one position, `(epoch, seq)`:
+
+- `GET /market/export` — signed links to the latest build: the whole
+  book as of one `(epoch, seq)`.
+- `wss://stream.skinshark.gg/market/stream` — the changes after that
+  position, one frame per second.
+
+Load a build, then subscribe from its `seq` and apply frames on top. Unlike
+the [live market](/guides/live-market), which serves the cheapest listings
+per item to end users, the market export carries every listing and is meant
+for a backend that keeps its own copy.
+
+## Access
+
+The market export is enabled per merchant by SkinShark. Your entitlement
+sets:
+
+| Entitlement | Effect |
+|---|---|
+| Level | How much detail each listing carries: `minimal`, `extended` or `full` |
+| Firehose | Whether the stream's `listings` channel can carry every item, rather than only the items you name |
+| Item cap | How many items one `listings` subscription can name |
+
+The levels are cumulative:
+
+| Level | Per listing |
+|---|---|
+| `minimal` | `id`, `itemId`, `phase`, `price`, `instant` |
+| `extended` | + `wear`, `seed`, `paintIndex`, `stickers` |
+| `full` | + `assetId`, `inspect`, `revertRefundPercent` |
+
+Both surfaces authenticate as the merchant itself. `On-Behalf-Of` is
+refused with `403 FORBIDDEN`, and an account without the entitlement gets
+`403 MARKET_DATA_NOT_ENABLED`.
+
+## Snapshot
+
+`GET /market/export` returns the latest build for your price tier and
+level.
+
+```ts
+const build = await api<BookExport>("/market/export", { method: "GET" });
+```
+
+```json
+{
+  "epoch": "1761746400000",
+  "seq": 18342,
+  "builtAt": "2026-10-29T14:05:00.000Z",
+  "listings": 2481337,
+  "feeBps": 250,
+  "level": "extended",
+  "prices": [
+    { "url": "https://…", "rows": 155083, "bytes": 4718231, "sha256": "3f1c9b0e…" }
+  ],
+  "detail": [
+    { "url": "https://…", "rows": 149870, "bytes": 6120044, "sha256": "a07d44e1…" }
+  ],
+  "expiresAt": "2026-10-29T14:15:12.000Z",
+  "stream": { "path": "/market/stream", "encodings": ["json", "msgpack"] }
+}
+```
+
+The book is split by item into 16 shards. `prices` lists all of them;
+`detail` lists the detail shards for your level, split the same way, and is
+`null` at `minimal`. The links expire at `expiresAt`, about 10 minutes after
+the call, and a new build lands about every 5 minutes.
+
+<Steps>
+  <Step title="Download every shard">
+    Fetch all `prices` shards, and the `detail` shards if you have them, in
+    parallel.
+  </Step>
+  <Step title="Verify">
+    Check each download's SHA-256 (hex, over the gzipped bytes as
+    downloaded) against `sha256`, and its line count after gunzipping
+    against `rows`. On a mismatch, call the export again and download that
+    shard from the new links.
+  </Step>
+  <Step title="Parse">
+    Gunzip each shard. Every line is one JSON array (NDJSON).
+  </Step>
+</Steps>
+
+A price line:
+
+```json
+["0190f4c2-8a1e-7c3b-9f0d-2b6e4a1c7d90", "a3f09c1d5e7b2468", "Phase 2", "12.34", 1]
+```
+
+| Position | Field | Type | Notes |
+|---|---|---|---|
+| 0 | `id` | string | Listing id (UUID). Buy it with `POST /market/buy`. |
+| 1 | `itemId` | string | 16-hex item id |
+| 2 | `phase` | string \| null | Doppler phase name, or `null` |
+| 3 | `price` | string | USD decimal string, fee included (`"12.34"`) |
+| 4 | `instant` | `1` \| `0` | `1` for instant delivery |
+
+A detail line is `[id, detail]`. Join it to the price line with the same
+`id`; listings with no detail have no detail line.
+
+```json
+["0190f4c2-8a1e-7c3b-9f0d-2b6e4a1c7d90", { "wear": 0.0213, "seed": 412, "paintIndex": 419, "stickers": ["Crown (Foil)"] }]
+```
+
+| Field | Level | Type | Notes |
+|---|---|---|---|
+| `wear` | `extended` | number | Float value |
+| `seed` | `extended` | integer | Paint seed |
+| `paintIndex` | `extended` | integer | Paint index |
+| `stickers` | `extended` | string[] | Sticker names |
+| `assetId` | `full` | string | Steam asset id |
+| `inspect` | `full` | string | Hex inspect token |
+| `revertRefundPercent` | `full` | integer | Share of the price returned if the buyer reverts the trade, 0–100 |
+
+Any field can be absent when it does not apply to the item.
+
+### Polling for new builds
+
+The response carries an `ETag`. Send it back as `If-None-Match` and the
+export answers `304 Not Modified` with no body while the build is
+unchanged. A fee or level change on your account changes the tag too.
+
+```ts
+const res = await fetch("https://api.skinshark.gg/market/export", {
+  headers: { "api-key": API_KEY, "If-None-Match": lastEtag },
+});
+if (res.status === 304) return; // still current
+```
+
+`503 EXPORT_NOT_READY` means the build for your price tier is not there yet,
+for example for about a minute after a new epoch. Retry shortly.
+
+## Stream
+
+```http
+wss://stream.skinshark.gg/market/stream?encoding=json
+```
+
+<ParamField query="encoding" type="string" default="json">
+  `json` or `msgpack`. See [Encodings](#encodings).
+</ParamField>
+
+### Authentication
+
+Authenticate in one of two ways:
+
+- **API key** — send the `api-key` header on the upgrade request. Use this
+  from a server-side client.
+- **Ticket** — mint one with `POST /auth/ws-token` as the merchant itself
+  (no `On-Behalf-Of`), then pass it as a `bearer.<token>` subprotocol or as
+  `?token=`. See [Authentication](/guides/authentication).
+
+```ts
+const ws = new WebSocket(
+  "wss://stream.skinshark.gg/market/stream?encoding=json",
+  { headers: { "api-key": API_KEY } },
+);
+```
+
+Refusals happen before the upgrade, as an HTTP status with the standard
+[error envelope](/guides/envelope):
+
+| Status | Cause |
+|---|---|
+| 401 | Missing or invalid API key or ticket |
+| 403 | `MARKET_DATA_NOT_ENABLED`, or `FORBIDDEN` (not a merchant, `On-Behalf-Of`, or a ticket not minted by the merchant for itself) |
+| 429 | More than 10 open sockets for your merchant |
+
+### Hello
+
+On connect the server sends:
+
+```json
+{ "type": "hello", "epoch": "1761746400000", "seq": 18342, "level": "extended", "feeBps": 250, "firehose": false, "itemCap": 5000 }
+```
+
+`epoch` and `seq` are the stream's current position; `level`, `feeBps`,
+`firehose` and `itemCap` are your entitlement and price tier.
+
+### Subscribe
+
+Send one `subscribe` message:
+
+```json
+{ "op": "subscribe", "channels": ["prices", "listings"], "items": ["a3f09c1d5e7b2468"], "epoch": "1761746400000", "since": 18342 }
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `channels` | Yes | `["prices"]`, `["listings"]` or both |
+| `items` | No | Item ids for the `listings` channel, up to `itemCap`. Omit for every item (needs the firehose entitlement). |
+| `epoch` | No | Epoch to resume in |
+| `since` | No | Last `seq` you hold: the build's `seq`, or the last frame you applied |
+
+- `prices` — top of book (cheapest price and listing counts) for every item.
+- `listings` — listing adds, price moves and removals for the items you
+  named, or for every item without `items`.
+
+Send `epoch` and `since` together to resume: the server replays every frame
+after `since`, then continues live. Without them the stream starts at the
+current position. A later `subscribe` on the same socket changes the
+channels or items; it does not resume or replay.
+
+### Frames
+
+```json
+{
+  "type": "frame",
+  "epoch": "1761746400000",
+  "seq": 18343,
+  "t": 1761746701000,
+  "adds": [["0190f4c3-…", "a3f09c1d5e7b2468", null, "12.10", 0, { "wear": 0.152, "seed": 77 }]],
+  "prices": [["0190f4c2-…", "a3f09c1d5e7b2468", "11.95", 1]],
+  "removes": [["0190f4b9-…", "a3f09c1d5e7b2468"]],
+  "tops": [["a3f09c1d5e7b2468", null, "11.95", "11.95", 42, 9]]
+}
+```
+
+Each frame coalesces one second of changes. `t` is the frame time in Unix
+epoch ms.
+
+| Field | Channel | Element |
+|---|---|---|
+| `adds` | `listings` | `[id, itemId, phase, price, instant, detail \| null]` — a listing entered the book. `detail` follows your level, `null` at `minimal`. |
+| `prices` | `listings` | `[id, itemId, price, instant]` — the listing's price or delivery moved |
+| `removes` | `listings` | `[id, itemId]` — the listing left the book |
+| `tops` | `prices` | `[itemId, phase, best \| null, bestInstant \| null, listings, instantListings]` — the item's cheapest price, cheapest instant price, and listing counts |
+
+Within an epoch, `seq` increases by exactly 1 per frame, and a second with
+no change produces no frame. A frame with nothing for your subscription is
+not sent to you, so on a subscription that names `items` the `seq` you see
+can skip ahead. On an unfiltered subscription (both channels, firehose), a
+`seq` other than your last plus 1 means you missed a frame: send
+`subscribe` again with `since` set to the last `seq` you applied.
+
+### Encodings
+
+| | `json` | `msgpack` |
+|---|---|---|
+| Frames | Text | Binary |
+| Listing `id` | UUID string | 16 raw UUID bytes |
+| `itemId` | 16-hex string | 8 raw bytes |
+| Prices | Decimal string (`"12.34"`) | Integer cents (`1234`) |
+| `instant` | `1` / `0` | `true` / `false` |
+| Compression | `permessage-deflate` | None |
+
+`msgpack` costs far less CPU and bandwidth for high-volume consumers such
+as a firehose subscription. Prices carry your fee in both encodings. Your
+own messages may be JSON text or msgpack binary on either encoding.
+
+### Resync
+
+```json
+{ "type": "resync", "epoch": "1761750000000", "seq": 1 }
+```
+
+Drop your copy of the book, fetch the export again, and resume from the new
+build: open a new socket and subscribe with the build's `epoch` and
+`since: seq`. A `subscribe` on the socket you already hold does not replay,
+so frames sent while you load the build would be lost.
+
+A resync happens when a new epoch opens (a service restart, or a repricing
+too large to send as changes) and when your resume point is older than the
+replay window of about one hour. The export can answer
+`503 EXPORT_NOT_READY` for about a minute after a new epoch; retry until the
+build's `epoch` matches the resync's.
+
+### Errors
+
+```json
+{ "type": "error", "key": "ITEM_CAP_EXCEEDED", "message": "At most 5000 items" }
+```
+
+| Key | Cause |
+|---|---|
+| `INVALID_MESSAGE` | The message wasn't readable or wasn't a valid `subscribe` |
+| `FIREHOSE_NOT_ENABLED` | `listings` without `items`, and no firehose entitlement |
+| `ITEM_CAP_EXCEEDED` | More `items` than your `itemCap` |
+
+The subscription is unchanged after an error; send a corrected `subscribe`.
+
+### Slow consumers
+
+If you fall more than 8 MB behind, the server closes the socket with code
+`4009`. The close reason is JSON:
+
+```json
+{ "key": "SLOW_CONSUMER", "epoch": "1761746400000", "seq": 18390 }
+```
+
+Reconnect and subscribe with `epoch` and `since` set to the last frame you
+applied to resume where you left off. If it keeps happening, switch to
+`msgpack` or narrow the subscription.
+
+## End to end
+
+```ts
+async function loadBook() {
+  const build = await exportWithRetry(); // retries 503 EXPORT_NOT_READY
+  const book = new Map<string, Listing>();
+  await Promise.all(
+    [...build.prices, ...(build.detail ?? [])].map(async (shard) => {
+      const gz = await download(shard.url);
+      if (sha256Hex(gz) !== shard.sha256) throw new Error("shard checksum");
+      const lines = gunzip(gz).trim().split("\n");
+      if (lines.length !== shard.rows) throw new Error("shard rows");
+      for (const line of lines) applyLine(book, JSON.parse(line)); // price or detail line, keyed by id
+    }),
+  );
+  return { book, epoch: build.epoch, seq: build.seq };
+}
+
+let state = await loadBook();
+
+function connect() {
+  const ws = new WebSocket(STREAM_URL, { headers: { "api-key": API_KEY } });
+
+  ws.on("open", () =>
+    ws.send(JSON.stringify({
+      op: "subscribe",
+      channels: ["prices", "listings"], // listings without items needs the firehose entitlement
+      epoch: state.epoch,
+      since: state.seq,
+    })),
+  );
+
+  ws.on("message", async (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === "frame") {
+      for (const [id, itemId, phase, price, instant, detail] of msg.adds) state.book.set(id, { itemId, phase, price, instant, detail });
+      for (const [id, , price, instant] of msg.prices) Object.assign(state.book.get(id) ?? {}, { price, instant });
+      for (const [id] of msg.removes) state.book.delete(id);
+      state.seq = msg.seq;
+    } else if (msg.type === "resync") {
+      ws.removeAllListeners("close");
+      ws.close();
+      state = await loadBook();
+      connect();
+    }
+  });
+
+  // Resumes from the last applied frame, including after a 4009 slow-consumer close.
+  ws.on("close", () => setTimeout(connect, 1000));
+}
+
+connect();
+```
+
+Buy any listing in your copy by passing its `id` to `POST /market/buy`. A
+listing can still sell between your last frame and the purchase; see
+[Live market](/guides/live-market#buying-a-listing-that-just-sold) for how
+`POST /market/buy` handles that.
+
+
 # Data models
 Source: https://skinshark.gg/docs/reference/data-models
 
@@ -4453,6 +4819,8 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 2000 | `MARKET_UNAVAILABLE` | 503 | No marketplace workers healthy. Retry once after 30s. |
 | 2001 | `MARKET_TIMEOUT` | 504 | Marketplace worker did not respond in time. |
 | 2002 | `WORKER_LOW_BALANCE` | 503 | Marketplace worker has insufficient balance to settle. |
+| 2005 | `MARKET_DATA_NOT_ENABLED` | 403 | The [market export](/guides/market-export) is not enabled for this merchant. |
+| 2006 | `EXPORT_NOT_READY` | 503 | The market export build for your price tier is not there yet (for example, just after a new epoch). Retry shortly. |
 | 2010 | `ORDER_NOT_FOUND` | 404 | Trade ID or external ID doesn't exist in your scope. |
 | 2011 | `LISTING_NOT_FOUND` | 404 | Listing sold / removed since you fetched it. |
 | 2012 | `LISTING_DETAIL_FAILED` | 502 | Failed to fetch listing details from upstream. |
@@ -4543,14 +4911,13 @@ Each request deducts from the bucket according to its cost class:
 | Class | Cost | Endpoints |
 |---|---|---|
 | Cheap | 1 | All routes by default — reads, profile, settings, normal writes, sub-user CRUD, etc. |
-| Expensive | 5 | The five worker-fanout / external-API endpoints listed below. |
+| Expensive | 5 | The six endpoints listed below. |
 
-The expensive endpoints — these dispatch to marketplace workers or hit
-external-marketplace APIs, so each call costs 5 tokens against your
-tier budget:
+The expensive endpoints cost 5 tokens each against your tier budget:
 
 | Method | Path |
 |---|---|
+| `GET` | `/market/export` |
 | `GET` | `/market/items/{itemId}/listings` |
 | `GET` | `/market/listings/{listingId}` |
 | `POST` | `/market/buy` |
@@ -5186,6 +5553,37 @@ straight to `/market/buy`.
 To learn when a listing you show sells or reprices, watch its id over
 `wss://api.skinshark.gg/market/live?scope=watch`. `page`/`limit`
 page through it; `limit=-1` returns the whole feed in one response.
+
+### GET /market/export
+
+**Market export**
+
+**Auth context:** merchant only. `On-Behalf-Of` rejected. Requires the
+market-data entitlement, enabled per merchant by SkinShark.
+
+Returns signed links to the latest build of the market export: the
+full-depth, deduplicated book of every buyable listing, one listing per
+physical item, priced for your account (prices already include your
+fee). Each listing `id` can be passed straight to `/market/buy`.
+
+A build is 16 gzipped NDJSON `prices` shards, split by item, plus the
+`detail` shards for your level (`null` at `minimal`). Download them in
+parallel, check each shard's `sha256` (hex of the gzipped bytes) and
+`rows`, then gunzip. The links expire at `expiresAt`, about 10 minutes
+after the call. A new build lands about every 5 minutes.
+
+- Price line: `[id, itemId, phase, price, instant]` — `price` is a
+  decimal string in USD (`"12.34"`), `instant` is `1` or `0`.
+- Detail line: `[id, detail]` — join to prices by `id`; listings with
+  no detail are omitted. `extended`: `wear`, `seed`, `paintIndex`,
+  `stickers`. `full` adds `assetId`, `inspect`, `revertRefundPercent`.
+
+The build is the whole book as of (`epoch`, `seq`). Keep it current by
+subscribing to `wss://stream.skinshark.gg/market/stream` with
+`epoch` and `since: seq`.
+
+The response carries an `ETag`. Send it back as `If-None-Match` to get
+`304 Not Modified` with no body while the build is unchanged.
 
 ### POST /market/buy
 
