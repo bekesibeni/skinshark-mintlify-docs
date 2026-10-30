@@ -1305,7 +1305,7 @@ components:
 
     BookExportResponse:
       type: object
-      required: [epoch, seq, builtAt, listings, feeBps, level, prices, detail, expiresAt, stream]
+      required: [epoch, seq, builtAt, listings, feeBps, level, items, prices, detail, expiresAt, stream]
       properties:
         epoch:
           type: string
@@ -1325,6 +1325,10 @@ components:
           type: string
           enum: [minimal, extended, full]
           description: Detail level of your entitlement.
+        items:
+          allOf:
+            - $ref: '#/components/schemas/BookShardLink'
+          description: The file naming every item in the build.
         prices:
           type: array
           items: { $ref: '#/components/schemas/BookShardLink' }
@@ -3583,13 +3587,15 @@ paths:
         fee). Each listing `id` can be passed straight to `/market/buy`.
 
         A build is 16 gzipped NDJSON `prices` shards, split by item, plus the
-        `detail` shards for your level (`null` at `minimal`). Download them in
+        `detail` shards for your level (`null` at `minimal`) and one `items`
+        file naming every item. Download them in
         parallel, check each shard's `sha256` (hex of the gzipped bytes) and
         `rows`, then gunzip. The links expire at `expiresAt`, about 10 minutes
         after the call. A new build lands about every 5 minutes.
 
         - Price line: `[id, itemId, phase, price, instant]` — `price` is a
           decimal string in USD (`"12.34"`), `instant` is `1` or `0`.
+        - Items line: `[itemId, marketHashName]` — join to prices by `itemId`.
         - Detail line: `[id, detail]` — join to prices by `id`; listings with
           no detail are omitted. `extended`: `wear`, `seed`, `paintIndex`,
           `stickers`. `full` adds `assetId`, `inspect`, `revertRefundPercent`.
