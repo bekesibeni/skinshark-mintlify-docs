@@ -1305,7 +1305,7 @@ components:
 
     BookExportResponse:
       type: object
-      required: [epoch, seq, builtAt, listings, feeBps, level, items, prices, detail, expiresAt, stream]
+      required: [epoch, seq, builtAt, listings, feeBps, level, files, expiresAt, stream]
       properties:
         epoch:
           type: string
@@ -1325,18 +1325,10 @@ components:
           type: string
           enum: [minimal, extended, full]
           description: Detail level of your entitlement.
-        items:
-          allOf:
-            - $ref: '#/components/schemas/BookShardLink'
-          description: The file naming every item in the build.
-        prices:
+        files:
           type: array
           items: { $ref: '#/components/schemas/BookShardLink' }
-          description: Price shards, split by item. Download all of them.
-        detail:
-          type: [array, "null"]
-          items: { $ref: '#/components/schemas/BookShardLink' }
-          description: Detail shards for your level, split by item the same way. `null` at `minimal`.
+          description: The build at your level, split by item. Download all of them.
         expiresAt:
           type: string
           format: date-time
@@ -3586,19 +3578,18 @@ paths:
         physical item, priced for your account (prices already include your
         fee). Each listing `id` can be passed straight to `/market/buy`.
 
-        A build is 16 gzipped NDJSON `prices` shards, split by item, plus the
-        `detail` shards for your level (`null` at `minimal`) and one `items`
-        file naming every item. Download them in
-        parallel, check each shard's `sha256` (hex of the gzipped bytes) and
-        `rows`, then gunzip. The links expire at `expiresAt`, about 10 minutes
-        after the call. A new build lands about every 5 minutes.
+        A build is 16 gzipped NDJSON `files`, split by item, with a whole listing
+        on every line. Download them in parallel, check each file's `sha256`
+        (hex of the gzipped bytes) and `rows`, then gunzip. The links expire at
+        `expiresAt`, about 10 minutes after the call. A new build lands about
+        every 15 minutes.
 
-        - Price line: `[id, itemId, phase, price, instant]` — `price` is a
-          decimal string in USD (`"12.34"`), `instant` is `1` or `0`.
-        - Items line: `[itemId, marketHashName]` — join to prices by `itemId`.
-        - Detail line: `[id, detail]` — join to prices by `id`; listings with
-          no detail are omitted. `extended`: `wear`, `seed`, `paintIndex`,
-          `stickers`. `full` adds `assetId`, `inspect`, `revertRefundPercent`.
+        - Each line is a listing as a JSON object: `id`, `itemId`, `name`,
+          `phase`, `price` (a decimal string in USD, `"12.34"`) and `instant`
+          (boolean), then the detail fields of your level.
+        - Detail by level. `minimal`: `wear`, `seed`. `extended` adds
+          `paintIndex`, `stickers`. `full` adds `assetId`, `inspect`,
+          `revertRefundPercent`.
 
         The build is the whole book as of (`epoch`, `seq`). Keep it current by
         subscribing to `wss://stream.skinshark.gg/market/stream` with
