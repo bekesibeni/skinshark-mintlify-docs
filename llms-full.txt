@@ -3420,8 +3420,8 @@ The levels are cumulative:
 
 | Level | Per listing |
 |---|---|
-| `minimal` | `id`, `itemId`, `phase`, `price`, `instant` |
-| `extended` | + `wear`, `seed`, `paintIndex`, `stickers` |
+| `minimal` | `id`, `itemId`, `name`, `phase`, `price`, `instant`, `wear`, `seed` |
+| `extended` | + `paintIndex`, `stickers` |
 | `full` | + `assetId`, `inspect`, `revertRefundPercent` |
 
 Both surfaces authenticate as the merchant itself. `On-Behalf-Of` is
@@ -3444,29 +3444,23 @@ const build = await api<BookExport>("/market/export", { method: "GET" });
   "builtAt": "2026-10-29T14:05:00.000Z",
   "listings": 2481337,
   "feeBps": 250,
-  "level": "extended",
-  "items": { "url": "https://…", "rows": 36981, "bytes": 812044, "sha256": "c41e07ab…" },
-  "prices": [
-    { "url": "https://…", "rows": 155083, "bytes": 4718231, "sha256": "3f1c9b0e…" }
-  ],
-  "detail": [
-    { "url": "https://…", "rows": 149870, "bytes": 6120044, "sha256": "a07d44e1…" }
+  "level": "full",
+  "files": [
+    { "url": "https://…", "rows": 155083, "bytes": 9718231, "sha256": "3f1c9b0e…" }
   ],
   "expiresAt": "2026-10-29T14:15:12.000Z",
   "stream": { "path": "/market/stream", "encodings": ["json", "msgpack"] }
 }
 ```
 
-The book is split by item into 16 shards. `prices` lists all of them;
-`detail` lists the detail shards for your level, split the same way, and is
-`null` at `minimal`. `items` is one more file, in the same format, that names
-every item in the build. The links expire at `expiresAt`, about 10 minutes
-after the call, and a new build lands about every 5 minutes.
+The book is split by item into 16 files, all listed in `files`. Every line is
+a whole listing at your level, so there is nothing to join. The links expire at
+`expiresAt`, about 10 minutes after the call, and a new build lands about every
+15 minutes.
 
 <Steps>
   <Step title="Download every shard">
-    Fetch `items`, all `prices` shards, and the `detail` shards if you have
-    them, in parallel.
+    Fetch all `files` in parallel.
   </Step>
   <Step title="Verify">
     Check each download's SHA-256 (hex, over the gzipped bytes as
@@ -3475,49 +3469,39 @@ after the call, and a new build lands about every 5 minutes.
     shard from the new links.
   </Step>
   <Step title="Parse">
-    Gunzip each shard. Every line is one JSON array (NDJSON).
+    Gunzip each file. Every line is one JSON object (NDJSON).
   </Step>
 </Steps>
 
-A price line:
+A line at `full`:
 
 ```json
-["0190f4c2-8a1e-7c3b-9f0d-2b6e4a1c7d90", "a3f09c1d5e7b2468", "Phase 2", "12.34", 1]
+{ "id": "0190f4c2-8a1e-7c3b-9f0d-2b6e4a1c7d90", "itemId": "a3f09c1d5e7b2468", "name": "★ Karambit | Doppler (Factory New)", "phase": "Phase 2", "price": "1243.50", "instant": true, "wear": 0.0213, "seed": 412, "paintIndex": 419, "stickers": ["Crown (Foil)"], "assetId": "41234567890", "inspect": "00180020…", "revertRefundPercent": 70 }
 ```
 
-| Position | Field | Type | Notes |
-|---|---|---|---|
-| 0 | `id` | string | Listing id (UUID). Buy it with `POST /market/buy`. |
-| 1 | `itemId` | string | 16-hex item id |
-| 2 | `phase` | string \| null | Doppler phase name, or `null` |
-| 3 | `price` | string | USD decimal string, fee included (`"12.34"`) |
-| 4 | `instant` | `1` \| `0` | `1` for instant delivery |
-
-An `items` line is `[itemId, marketHashName]`. Join it to the price line with
-the same `itemId` to get the skin's name.
+The same listing at `minimal`:
 
 ```json
-["a3f09c1d5e7b2468", "★ Karambit | Doppler (Factory New)"]
-```
-
-A detail line is `[id, detail]`. Join it to the price line with the same
-`id`; listings with no detail have no detail line.
-
-```json
-["0190f4c2-8a1e-7c3b-9f0d-2b6e4a1c7d90", { "wear": 0.0213, "seed": 412, "paintIndex": 419, "stickers": ["Crown (Foil)"] }]
+{ "id": "0190f4c2-8a1e-7c3b-9f0d-2b6e4a1c7d90", "itemId": "a3f09c1d5e7b2468", "name": "★ Karambit | Doppler (Factory New)", "phase": "Phase 2", "price": "1243.50", "instant": true, "wear": 0.0213, "seed": 412 }
 ```
 
 | Field | Level | Type | Notes |
 |---|---|---|---|
-| `wear` | `extended` | number | Float value |
-| `seed` | `extended` | integer | Paint seed |
+| `id` | `minimal` | string | Listing id (UUID). Buy it with `POST /market/buy`. |
+| `itemId` | `minimal` | string | 16-hex item id |
+| `name` | `minimal` | string | The skin's market name |
+| `phase` | `minimal` | string \| null | Doppler phase name, or `null` |
+| `price` | `minimal` | string | USD decimal string, fee included (`"12.34"`) |
+| `instant` | `minimal` | boolean | `true` for instant delivery |
+| `wear` | `minimal` | number | Float value |
+| `seed` | `minimal` | integer | Paint seed (pattern) |
 | `paintIndex` | `extended` | integer | Paint index |
 | `stickers` | `extended` | string[] | Sticker names |
 | `assetId` | `full` | string | Steam asset id |
 | `inspect` | `full` | string | Hex inspect token |
 | `revertRefundPercent` | `full` | integer | Share of the price returned if the buyer reverts the trade, 0–100 |
 
-Any field can be absent when it does not apply to the item.
+A detail field (`wear` onward) is absent when it does not apply to the item.
 
 ### Polling for new builds
 
@@ -3626,7 +3610,7 @@ epoch ms.
 
 | Field | Channel | Element |
 |---|---|---|
-| `adds` | `listings` | `[id, itemId, phase, price, instant, detail \| null]` — a listing entered the book. `detail` follows your level, `null` at `minimal`. |
+| `adds` | `listings` | `[id, itemId, phase, price, instant, detail]` — a listing entered the book. `detail` follows your level. |
 | `prices` | `listings` | `[id, itemId, price, instant]` — the listing's price or delivery moved |
 | `removes` | `listings` | `[id, itemId]` — the listing left the book |
 | `tops` | `prices` | `[itemId, phase, best \| null, bestInstant \| null, listings, instantListings]` — the item's cheapest price, cheapest instant price, and listing counts |
@@ -3667,7 +3651,7 @@ so frames sent while you load the build would be lost.
 A resync happens when a new epoch opens (a service restart, or a repricing
 too large to send as changes) and when your resume point is older than the
 replay window of about one hour. The export can answer
-`503 EXPORT_NOT_READY` for about a minute after a new epoch; retry until the
+`503 EXPORT_NOT_READY` for a few minutes after a new epoch; retry until the
 build's `epoch` matches the resync's.
 
 ### Errors
@@ -3704,12 +3688,15 @@ async function loadBook() {
   const build = await exportWithRetry(); // retries 503 EXPORT_NOT_READY
   const book = new Map<string, Listing>();
   await Promise.all(
-    [...build.prices, ...(build.detail ?? [])].map(async (shard) => {
+    build.files.map(async (shard) => {
       const gz = await download(shard.url);
       if (sha256Hex(gz) !== shard.sha256) throw new Error("shard checksum");
       const lines = gunzip(gz).trim().split("\n");
       if (lines.length !== shard.rows) throw new Error("shard rows");
-      for (const line of lines) applyLine(book, JSON.parse(line)); // price or detail line, keyed by id
+      for (const line of lines) {
+        const { id, ...listing } = JSON.parse(line);
+        book.set(id, listing);
+      }
     }),
   );
   return { book, epoch: build.epoch, seq: build.seq };
@@ -5575,19 +5562,18 @@ full-depth, deduplicated book of every buyable listing, one listing per
 physical item, priced for your account (prices already include your
 fee). Each listing `id` can be passed straight to `/market/buy`.
 
-A build is 16 gzipped NDJSON `prices` shards, split by item, plus the
-`detail` shards for your level (`null` at `minimal`) and one `items`
-file naming every item. Download them in
-parallel, check each shard's `sha256` (hex of the gzipped bytes) and
-`rows`, then gunzip. The links expire at `expiresAt`, about 10 minutes
-after the call. A new build lands about every 5 minutes.
+A build is 16 gzipped NDJSON `files`, split by item, with a whole listing
+on every line. Download them in parallel, check each file's `sha256`
+(hex of the gzipped bytes) and `rows`, then gunzip. The links expire at
+`expiresAt`, about 10 minutes after the call. A new build lands about
+every 15 minutes.
 
-- Price line: `[id, itemId, phase, price, instant]` — `price` is a
-  decimal string in USD (`"12.34"`), `instant` is `1` or `0`.
-- Items line: `[itemId, marketHashName]` — join to prices by `itemId`.
-- Detail line: `[id, detail]` — join to prices by `id`; listings with
-  no detail are omitted. `extended`: `wear`, `seed`, `paintIndex`,
-  `stickers`. `full` adds `assetId`, `inspect`, `revertRefundPercent`.
+- Each line is a listing as a JSON object: `id`, `itemId`, `name`,
+  `phase`, `price` (a decimal string in USD, `"12.34"`) and `instant`
+  (boolean), then the detail fields of your level.
+- Detail by level. `minimal`: `wear`, `seed`. `extended` adds
+  `paintIndex`, `stickers`. `full` adds `assetId`, `inspect`,
+  `revertRefundPercent`.
 
 The build is the whole book as of (`epoch`, `seq`). Keep it current by
 subscribing to `wss://stream.skinshark.gg/market/stream` with
