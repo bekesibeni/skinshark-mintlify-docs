@@ -71,7 +71,7 @@ const build = await api<BookExport>("/market/export", { method: "GET" });
 The book is split by item into 16 files, all listed in `files`. Every line is
 a whole listing at your level, so there is nothing to join. The links expire at
 `expiresAt`, about 10 minutes after the call, and a new build lands about every
-15 minutes.
+20 minutes.
 
 <Steps>
   <Step title="Download every shard">
@@ -263,7 +263,7 @@ build: open a new socket and subscribe with the build's `epoch` and
 `since: seq`. A `subscribe` on the socket you already hold does not replay,
 so frames sent while you load the build would be lost.
 
-A resync happens when a new epoch opens (a service restart, or a repricing
+A resync happens when a new epoch opens (an unplanned service restart, or a repricing
 too large to send as changes) and when your resume point is older than the
 replay window of about one hour. The export can answer
 `503 EXPORT_NOT_READY` for a few minutes after a new epoch; retry until the

@@ -3582,7 +3582,7 @@ paths:
         on every line. Download them in parallel, check each file's `sha256`
         (hex of the gzipped bytes) and `rows`, then gunzip. The links expire at
         `expiresAt`, about 10 minutes after the call. A new build lands about
-        every 15 minutes.
+        every 20 minutes.
 
         - Each line is a listing as a JSON object: `id`, `itemId`, `name`,
           `phase`, `price` (a decimal string in USD, `"12.34"`) and `instant`
