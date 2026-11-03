@@ -220,7 +220,7 @@ sessions. This is intentional: provisioning happens server-to-server.
 const sub = await api<{
   id: string;
   externalId: string | null;
-  currency: "USD" | "EUR";
+  currency: "USD";
 }>("/merchant/users", {
   method: "POST",
   body: JSON.stringify({
@@ -832,8 +832,6 @@ async function fund(subUserId: string, amount: string) {
       switch (err.key) {
         case "INSUFFICIENT_BALANCE":
           return notifyOps("merchant balance below threshold");
-        case "TRANSFER_CURRENCY_MISMATCH":
-          throw new BadRequest("sub-user wallet currency differs from merchant");
         case "IDEMPOTENCY_KEY_REQUIRED":
           throw new BadRequest("missing Idempotency-Key header");
       }
@@ -994,25 +992,8 @@ after padding.
 
 ## Currency
 
-Every wallet has exactly one currency: `USD` or `EUR`. **Merchant accounts
-are USD-only** — attempting to set them to anything else returns
-`MERCHANT_MUST_BE_USD` (1521). Sub-users default to USD on creation; pass
-`currency: "EUR"` on `POST /merchant/users` to override per sub-user.
-
-Funding a sub-user from the merchant spot wallet requires both wallets to
-share a currency. EUR sub-users must be funded via deposit, not internal
-transfer:
-
-```json
-{
-  "code": 1520,
-  "key": "TRANSFER_CURRENCY_MISMATCH",
-  "message": "Merchant and sub-user currencies do not match"
-}
-```
-
-Cross-currency transfers go through the deposit flow (deposit fiat in the
-sub-user's currency) rather than direct fund transfers.
+Every wallet, merchant and sub-user alike, holds USD, and every `currency` field reads `USD`.
+Card deposits through Onramp can still be paid in EUR or GBP; they credit the wallet in USD.
 
 
 # Pagination
@@ -1534,9 +1515,7 @@ await withRetry(() =>
 | Key | Cause | Fix |
 |---|---|---|
 | `INSUFFICIENT_BALANCE` | Wallet balance < required. | Top up or reject the operation. |
-| `TRANSFER_CURRENCY_MISMATCH` | Merchant ≠ sub-user wallet currency. | Use deposit flow. |
 | `INVALID_AMOUNT` | Amount ≤ 0 or wrong format. | Validate input. |
-| `MERCHANT_MUST_BE_USD` | Tried to set merchant currency to non-USD. | Merchants are USD-only. |
 
 ### Trade (mostly user-facing)
 
@@ -1868,7 +1847,7 @@ SkinShark UUID.
 
 ```ts
 async function onboardCustomer(internalUserId: string, email: string) {
-  return api<{ id: string; externalId: string; currency: "USD" | "EUR" }>(
+  return api<{ id: string; externalId: string; currency: "USD" }>(
     "/merchant/users",
     {
       method: "POST",
@@ -2832,7 +2811,9 @@ Each refunded item also carries its `refundAmount` on the item itself —
 present on **every** trade event once the item is refunded, so prefer it
 over the top-level `refund` block when reconciling. It equals the item
 `price` except on a buyer revert after delivery, where it is the listing's
-`revertRefundPercent` share (possibly 0).
+`revertRefundPercent` share (possibly 0). Buy items also carry that
+`revertRefundPercent` once they fill: the share of the order actually
+placed, which can differ from the listing you named after a fallback.
 Settlement events (`trade.settled`, `trade.completed`) additionally
 include the fee breakdown. `trade.refunded` events additionally include a
 `refund` block — the `refundAmount` that went back to the wallet for
@@ -3366,6 +3347,10 @@ have the purchase take the next copy instead, send
 is bought, the cheapest other listing of the same item, phase and delivery
 tier at or under your `maxPrice` is bought in its place.
 
+To keep a refund share through that, send `minRevertRefundPercent` with the
+shown `revertRefundPercent`: no fallback or failover fills below it. A listing
+that names no share counts as 0.
+
 ## Close codes
 
 | Code | Reason | Cause |
@@ -3758,7 +3743,7 @@ successful envelope. Generate them with `openapi-typescript`
 ## Enums
 
 ```ts
-type Currency = "USD" | "EUR";
+type Currency = "USD";
 
 type Role = "user" | "merchant" | "admin";
 
@@ -4043,10 +4028,16 @@ interface TradeItem {
   offerId?: string;         // Steam offer carrying this item; latest if re-sent. Shared by items sent together
   error?: TradeFailureCode; // set when status is "failed" or "declined"
   errorDetail?: string;     // raw marketplace reason, debug only — opaque
+  // A listing buy that failed PRICE_CHANGED: what the listing costs now, fee-inclusive like price.
+  // Re-buy with a maxPrice at or above it. Absent when the market refused without naming a price.
+  newPrice?: number;
   // Refunded buy items only (failed/canceled/declined/reverted): returned to your balance, in the
   // trade currency. Equals price except on a buyer revert (revertedBy "user"), where it is the
   // listing's revertRefundPercent share, possibly 0. Sell items never carry it.
   refundAmount?: number;
+  // Buy items only: the buyer-revert share of the order actually placed, which can differ from the
+  // listing you named after a fallback. Absent until it fills, or if unknown.
+  revertRefundPercent?: number;
 }
 
 interface Trade {
@@ -4198,7 +4189,7 @@ interface SellResponse {
   id: string;
   status: TradeStatus;         // "initiated" right after submit
   itemCount: number;
-  totalPrice: number;          // payout in wallet currency, at a locked FX rate
+  totalPrice: number;          // payout in USD
   currency: Currency;
   createdAt: string;
 }
@@ -4736,8 +4727,6 @@ Cross-cutting errors that any endpoint can return.
 | 1504 | `INVALID_AMOUNT` | 422 | Amount ≤ 0 or wrong format. |
 | 1510 | `IDEMPOTENCY_CONFLICT` | 409 | Same `Idempotency-Key`, different request body. |
 | 1511 | `IDEMPOTENCY_KEY_REQUIRED` | 422 | `Idempotency-Key` header missing on `/fund`. |
-| 1520 | `TRANSFER_CURRENCY_MISMATCH` | 422 | Source and destination wallets in different currencies. |
-| 1521 | `MERCHANT_MUST_BE_USD` | 422 | Merchant accounts must use USD. |
 | 1522 | `FX_RATE_UNAVAILABLE` | 503 | FX rate unavailable — retry shortly. |
 
 ## Deposits — gateway (1600–1608)
@@ -4821,6 +4810,7 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 2011 | `LISTING_NOT_FOUND` | 404 | Listing sold / removed since you fetched it. |
 | 2012 | `LISTING_DETAIL_FAILED` | 502 | Failed to fetch listing details from upstream. |
 | 2013 | `LISTING_BUYER_INELIGIBLE` | 422 | These listings can't be delivered to the buyer's Steam account. `listingIds` names them; `reason` is `trade_hold`, `inventory_private`, `inventory_unavailable` (CS2 inventory not open to incoming trades) or `restricted`. Nothing was charged. Pick other listings, or send `fallback: "same_item"` to buy the same item from a listing that can be delivered. Quick buys skip these listings automatically and return this error only when no other listing can serve the buyer. |
+| 2014 | `REVERT_REFUND_BELOW_MINIMUM` | 422 | These listings refund less on a buyer revert than the `minRevertRefundPercent` you sent. `listingIds` names them. Nothing was charged. |
 | 2020 | `PRICE_MISMATCH` | 409 | Listing price drifted above your `maxPrice`. |
 | 2021 | `PRICE_BELOW_MINIMUM` | 422 | Quick-buy `maxPrice` below current minimum listing price. |
 | 2022 | `TRADEURL_REQUIRED` | 422 | Sub-user has no primary Steam trade URL set. |
@@ -5137,12 +5127,10 @@ API. Returns `null` data on success.
 **Auth context:** merchant only. **Rate limit: 100 / 5min.**
 
 Requires `Idempotency-Key`. Replay returns the original transaction id
-with `idempotent: true`. The sub-user's wallet currency must match the
-merchant's spot currency.
+with `idempotent: true`.
 
 Common error keys:
 - `INSUFFICIENT_BALANCE` (1500)
-- `TRANSFER_CURRENCY_MISMATCH` (1520)
 - `IDEMPOTENCY_KEY_REQUIRED` (1511) / `IDEMPOTENCY_CONFLICT` (1510)
 
 ### GET /merchant/wallet
@@ -5622,7 +5610,7 @@ detail and item listings read for that user (`On-Behalf-Of`) leave such listings
 for a while, so they aren't offered again.
 
 Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
-`LISTING_BUYER_INELIGIBLE` (2013), `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
+`LISTING_BUYER_INELIGIBLE` (2013), `REVERT_REFUND_BELOW_MINIMUM` (2014), `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
 Returns `503 SERVICE_DISABLED` when admin has paused trading.
 
 ## The sub-user hands cs2 items to a skinshark-operated steam bot and is paid
