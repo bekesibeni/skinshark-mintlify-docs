@@ -3583,7 +3583,7 @@ channels or items; it does not resume or replay.
   "epoch": "1761746400000",
   "seq": 18343,
   "t": 1761746701000,
-  "adds": [["0190f4c3-…", "a3f09c1d5e7b2468", null, "12.10", 0, { "wear": 0.152, "seed": 77 }]],
+  "adds": [["0190f4c3-…", "a3f09c1d5e7b2468", null, "12.10", 0, { "wear": 0.152, "seed": 77 }, "AK-47 | Redline (Field-Tested)"]],
   "prices": [["0190f4c2-…", "a3f09c1d5e7b2468", "11.95", 1]],
   "removes": [["0190f4b9-…", "a3f09c1d5e7b2468"]],
   "tops": [["a3f09c1d5e7b2468", null, "11.95", "11.95", 42, 9]]
@@ -3595,7 +3595,7 @@ epoch ms.
 
 | Field | Channel | Element |
 |---|---|---|
-| `adds` | `listings` | `[id, itemId, phase, price, instant, detail]` — a listing entered the book. `detail` follows your level. |
+| `adds` | `listings` | `[id, itemId, phase, price, instant, detail, name]` — a listing entered the book. `detail` follows your level. `name` is the item's market name, so an item that first appears after your export still has one. |
 | `prices` | `listings` | `[id, itemId, price, instant]` — the listing's price or delivery moved |
 | `removes` | `listings` | `[id, itemId]` — the listing left the book |
 | `tops` | `prices` | `[itemId, phase, best \| null, bestInstant \| null, listings, instantListings]` — the item's cheapest price, cheapest instant price, and listing counts |
@@ -3704,7 +3704,7 @@ function connect() {
   ws.on("message", async (raw) => {
     const msg = JSON.parse(raw.toString());
     if (msg.type === "frame") {
-      for (const [id, itemId, phase, price, instant, detail] of msg.adds) state.book.set(id, { itemId, phase, price, instant, detail });
+      for (const [id, itemId, phase, price, instant, detail, name] of msg.adds) state.book.set(id, { itemId, name, phase, price, instant, detail });
       for (const [id, , price, instant] of msg.prices) Object.assign(state.book.get(id) ?? {}, { price, instant });
       for (const [id] of msg.removes) state.book.delete(id);
       state.seq = msg.seq;
