@@ -146,8 +146,6 @@ Cross-cutting errors that any endpoint can return.
 | 1504 | `INVALID_AMOUNT` | 422 | Amount ≤ 0 or wrong format. |
 | 1510 | `IDEMPOTENCY_CONFLICT` | 409 | Same `Idempotency-Key`, different request body. |
 | 1511 | `IDEMPOTENCY_KEY_REQUIRED` | 422 | `Idempotency-Key` header missing on `/fund`. |
-| 1520 | `TRANSFER_CURRENCY_MISMATCH` | 422 | Source and destination wallets in different currencies. |
-| 1521 | `MERCHANT_MUST_BE_USD` | 422 | Merchant accounts must use USD. |
 | 1522 | `FX_RATE_UNAVAILABLE` | 503 | FX rate unavailable — retry shortly. |
 
 ## Deposits — gateway (1600–1608)
@@ -231,6 +229,7 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 2011 | `LISTING_NOT_FOUND` | 404 | Listing sold / removed since you fetched it. |
 | 2012 | `LISTING_DETAIL_FAILED` | 502 | Failed to fetch listing details from upstream. |
 | 2013 | `LISTING_BUYER_INELIGIBLE` | 422 | These listings can't be delivered to the buyer's Steam account. `listingIds` names them; `reason` is `trade_hold`, `inventory_private`, `inventory_unavailable` (CS2 inventory not open to incoming trades) or `restricted`. Nothing was charged. Pick other listings, or send `fallback: "same_item"` to buy the same item from a listing that can be delivered. Quick buys skip these listings automatically and return this error only when no other listing can serve the buyer. |
+| 2014 | `REVERT_REFUND_BELOW_MINIMUM` | 422 | These listings refund less on a buyer revert than the `minRevertRefundPercent` you sent. `listingIds` names them. Nothing was charged. |
 | 2020 | `PRICE_MISMATCH` | 409 | Listing price drifted above your `maxPrice`. |
 | 2021 | `PRICE_BELOW_MINIMUM` | 422 | Quick-buy `maxPrice` below current minimum listing price. |
 | 2022 | `TRADEURL_REQUIRED` | 422 | Sub-user has no primary Steam trade URL set. |

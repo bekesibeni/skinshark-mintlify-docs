@@ -186,9 +186,7 @@ await withRetry(() =>
 | Key | Cause | Fix |
 |---|---|---|
 | `INSUFFICIENT_BALANCE` | Wallet balance < required. | Top up or reject the operation. |
-| `TRANSFER_CURRENCY_MISMATCH` | Merchant ≠ sub-user wallet currency. | Use deposit flow. |
 | `INVALID_AMOUNT` | Amount ≤ 0 or wrong format. | Validate input. |
-| `MERCHANT_MUST_BE_USD` | Tried to set merchant currency to non-USD. | Merchants are USD-only. |
 
 ### Trade (mostly user-facing)
 

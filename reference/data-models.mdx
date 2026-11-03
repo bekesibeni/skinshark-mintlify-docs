@@ -11,7 +11,7 @@ successful envelope. Generate them with `openapi-typescript`
 ## Enums
 
 ```ts
-type Currency = "USD" | "EUR";
+type Currency = "USD";
 
 type Role = "user" | "merchant" | "admin";
 
@@ -296,10 +296,16 @@ interface TradeItem {
   offerId?: string;         // Steam offer carrying this item; latest if re-sent. Shared by items sent together
   error?: TradeFailureCode; // set when status is "failed" or "declined"
   errorDetail?: string;     // raw marketplace reason, debug only — opaque
+  // A listing buy that failed PRICE_CHANGED: what the listing costs now, fee-inclusive like price.
+  // Re-buy with a maxPrice at or above it. Absent when the market refused without naming a price.
+  newPrice?: number;
   // Refunded buy items only (failed/canceled/declined/reverted): returned to your balance, in the
   // trade currency. Equals price except on a buyer revert (revertedBy "user"), where it is the
   // listing's revertRefundPercent share, possibly 0. Sell items never carry it.
   refundAmount?: number;
+  // Buy items only: the buyer-revert share of the order actually placed, which can differ from the
+  // listing you named after a fallback. Absent until it fills, or if unknown.
+  revertRefundPercent?: number;
 }
 
 interface Trade {
@@ -451,7 +457,7 @@ interface SellResponse {
   id: string;
   status: TradeStatus;         // "initiated" right after submit
   itemCount: number;
-  totalPrice: number;          // payout in wallet currency, at a locked FX rate
+  totalPrice: number;          // payout in USD
   currency: Currency;
   createdAt: string;
 }

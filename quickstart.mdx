@@ -98,7 +98,7 @@ sessions. This is intentional: provisioning happens server-to-server.
 const sub = await api<{
   id: string;
   externalId: string | null;
-  currency: "USD" | "EUR";
+  currency: "USD";
 }>("/merchant/users", {
   method: "POST",
   body: JSON.stringify({

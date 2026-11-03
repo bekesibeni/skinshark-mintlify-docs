@@ -86,8 +86,6 @@ async function fund(subUserId: string, amount: string) {
       switch (err.key) {
         case "INSUFFICIENT_BALANCE":
           return notifyOps("merchant balance below threshold");
-        case "TRANSFER_CURRENCY_MISMATCH":
-          throw new BadRequest("sub-user wallet currency differs from merchant");
         case "IDEMPOTENCY_KEY_REQUIRED":
           throw new BadRequest("missing Idempotency-Key header");
       }

@@ -182,6 +182,10 @@ have the purchase take the next copy instead, send
 is bought, the cheapest other listing of the same item, phase and delivery
 tier at or under your `maxPrice` is bought in its place.
 
+To keep a refund share through that, send `minRevertRefundPercent` with the
+shown `revertRefundPercent`: no fallback or failover fills below it. A listing
+that names no share counts as 0.
+
 ## Close codes
 
 | Code | Reason | Cause |

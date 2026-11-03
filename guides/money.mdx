@@ -98,22 +98,5 @@ after padding.
 
 ## Currency
 
-Every wallet has exactly one currency: `USD` or `EUR`. **Merchant accounts
-are USD-only** — attempting to set them to anything else returns
-`MERCHANT_MUST_BE_USD` (1521). Sub-users default to USD on creation; pass
-`currency: "EUR"` on `POST /merchant/users` to override per sub-user.
-
-Funding a sub-user from the merchant spot wallet requires both wallets to
-share a currency. EUR sub-users must be funded via deposit, not internal
-transfer:
-
-```json
-{
-  "code": 1520,
-  "key": "TRANSFER_CURRENCY_MISMATCH",
-  "message": "Merchant and sub-user currencies do not match"
-}
-```
-
-Cross-currency transfers go through the deposit flow (deposit fiat in the
-sub-user's currency) rather than direct fund transfers.
+Every wallet, merchant and sub-user alike, holds USD, and every `currency` field reads `USD`.
+Card deposits through Onramp can still be paid in EUR or GBP; they credit the wallet in USD.

@@ -182,7 +182,9 @@ Each refunded item also carries its `refundAmount` on the item itself —
 present on **every** trade event once the item is refunded, so prefer it
 over the top-level `refund` block when reconciling. It equals the item
 `price` except on a buyer revert after delivery, where it is the listing's
-`revertRefundPercent` share (possibly 0).
+`revertRefundPercent` share (possibly 0). Buy items also carry that
+`revertRefundPercent` once they fill: the share of the order actually
+placed, which can differ from the listing you named after a fallback.
 Settlement events (`trade.settled`, `trade.completed`) additionally
 include the fee breakdown. `trade.refunded` events additionally include a
 `refund` block — the `refundAmount` that went back to the wallet for

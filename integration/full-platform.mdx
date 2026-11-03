@@ -48,7 +48,7 @@ SkinShark UUID.
 
 ```ts
 async function onboardCustomer(internalUserId: string, email: string) {
-  return api<{ id: string; externalId: string; currency: "USD" | "EUR" }>(
+  return api<{ id: string; externalId: string; currency: "USD" }>(
     "/merchant/users",
     {
       method: "POST",

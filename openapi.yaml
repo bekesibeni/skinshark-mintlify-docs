@@ -221,7 +221,7 @@ components:
     # ─────────────────────────────────────────────────────────────────────
     # Enums (mirror prisma/schema.prisma)
     # ─────────────────────────────────────────────────────────────────────
-    Currency: { type: string, enum: [USD, EUR] }
+    Currency: { type: string, enum: [USD] }
     UserStatus: { type: string, enum: [active, suspended, deleted] }
     Role: { type: string, enum: [user, merchant, admin] }
     TwoFactorMethod: { type: string, enum: [email, totp] }
@@ -373,7 +373,7 @@ components:
         feeBps: { type: [integer, "null"] }
         currency:
           type: [string, "null"]
-          enum: [USD, EUR, null]
+          enum: [USD, null]
         balance: { type: number }
         createdAt: { type: string, format: date-time }
 
@@ -1377,6 +1377,14 @@ components:
             buyer's Steam account. `same_item` buys the cheapest other listing of the same item,
             phase and delivery tier at or under `maxPrice` instead; `none` fails the item with
             `LISTING_UNAVAILABLE`, or rejects the request with `LISTING_BUYER_INELIGIBLE`.
+        minRevertRefundPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            Never fill below this `revertRefundPercent`, on this listing or on any fallback or failover.
+            A listing that names no percent counts as 0. A listing already below it is rejected with
+            `REVERT_REFUND_BELOW_MINIMUM`.
         externalId:
           type: string
           minLength: 1
@@ -1449,6 +1457,13 @@ components:
             Your own reference for each requested unit, applied in order. Must contain exactly
             `amount` entries, all distinct. Fills arrive over time and in no fixed order, so this
             is what lets you tell your units apart afterwards and cancel a specific one.
+        minRevertRefundPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            Never fill below this `revertRefundPercent`, on any market. A listing that names no percent
+            counts as 0.
 
     QuickBuyResponse:
       type: object
@@ -1545,6 +1560,13 @@ components:
             quick buy for the same item would have to bid when it failed, the same figure a synchronous
             `PRICE_BELOW_MINIMUM` returns as `error.minPrice`. Absent when your bid still cleared (the listing
             was simply taken first) or no market quoted the item.
+        newPrice:
+          type: number
+          description: |
+            Listing buys only. Set on a `failed` item with error `PRICE_CHANGED` when the listing was repriced
+            above your `maxPrice` before it filled: what the same listing costs now, fee-inclusive like `price`, so
+            the two compare directly. To buy it anyway, send a new buy for the same listing with a
+            `maxPrice` at or above it. Absent when the market refused without naming the new price.
         refundAmount:
           type: number
           description: |
@@ -1552,6 +1574,13 @@ components:
             trade snapshot and webhook: what was returned to your balance, in the trade currency. It equals `price`
             on everything except a buyer revert after delivery (`reverted` with `revertedBy: user`), which returns
             the share the listing's `revertRefundPercent` named, possibly 0. Buy trades only — sell items never carry it.
+        revertRefundPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            The buyer-revert refund share of the order actually placed, which can differ from the listing you
+            named after a fallback. Absent until it fills, or if unknown. Buy trades only.
 
     Trade:
       type: object
@@ -1772,7 +1801,7 @@ components:
         id: { type: string, format: uuid }
         status: { $ref: '#/components/schemas/TradeStatus' }
         itemCount: { type: integer }
-        totalPrice: { type: number, description: 'Total payout in the wallet currency, at a locked FX rate.' }
+        totalPrice: { type: number, description: 'Total payout in the wallet currency.' }
         currency: { $ref: '#/components/schemas/Currency' }
         createdAt: { type: string }
 
@@ -2254,12 +2283,10 @@ paths:
         **Auth context:** merchant only. **Rate limit: 100 / 5min.**
 
         Requires `Idempotency-Key`. Replay returns the original transaction id
-        with `idempotent: true`. The sub-user's wallet currency must match the
-        merchant's spot currency.
+        with `idempotent: true`.
 
         Common error keys:
         - `INSUFFICIENT_BALANCE` (1500)
-        - `TRANSFER_CURRENCY_MISMATCH` (1520)
         - `IDEMPOTENCY_KEY_REQUIRED` (1511) / `IDEMPOTENCY_CONFLICT` (1510)
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
@@ -3681,7 +3708,7 @@ paths:
         for a while, so they aren't offered again.
 
         Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
-        `LISTING_BUYER_INELIGIBLE` (2013), `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
+        `LISTING_BUYER_INELIGIBLE` (2013), `REVERT_REFUND_BELOW_MINIMUM` (2014), `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
         Returns `503 SERVICE_DISABLED` when admin has paused trading.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
