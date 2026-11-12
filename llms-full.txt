@@ -3502,7 +3502,8 @@ if (res.status === 304) return; // still current
 ```
 
 `503 EXPORT_NOT_READY` means the build for your price tier is not there yet,
-for example for about a minute after a new epoch. Retry shortly.
+for example for a few minutes after a new epoch. Retry after the `Retry-After`
+header's seconds.
 
 ## Stream
 
