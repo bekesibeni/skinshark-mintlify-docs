@@ -69,6 +69,8 @@ type OnrampPayCurrency = "USD" | "EUR" | "GBP";
 
 type CryptoEvmChain = "ethereum" | "base" | "arbitrum" | "optimism" | "bsc";
 
+type CryptoChain = CryptoEvmChain | "tron" | "solana";
+
 type CryptoNativeToken = "USDT" | "USDC" | "NATIVE";
 
 type TwoFactorMethod = "email" | "totp";
@@ -623,11 +625,23 @@ interface OnrampSessionResponse {
   whitelabelUrl: string;
 }
 
-// Self-hosted EVM crypto
+// Self-hosted crypto: EVM, Tron, Solana
+// One deposit address per chain family. `address` is what the sender pays to.
+interface CryptoAddressEntry {
+  family: "evm" | "tron" | "solana";
+  chains: CryptoChain[];
+  address: string;             // 0x... | T... | Solana wallet
+  tokens: ("USDT" | "USDC")[];
+  tokenAccounts?: Record<string, string>; // Solana only: the token account per coin
+}
+
+// GET /user/wallet/deposit/crypto/address?token=USDT|USDC
+// Solana is listed only for the coin named in `token`.
 interface CryptoAddressResponse {
-  address: string;             // 0x...
+  address: string;             // 0x..., the EVM entry repeated
   chains: CryptoEvmChain[];
   tokens: CryptoNativeToken[];
+  addresses: CryptoAddressEntry[]; // every live family, EVM first
 }
 
 interface CryptoQuoteBody {
@@ -641,12 +655,12 @@ interface CryptoQuoteResponse {
   walletCurrency: Currency;
   exchangeRate: number;
   feeBps: number;
-  chains: Record<CryptoEvmChain, {
+  chains: Partial<Record<CryptoChain, { // live chains only
     feeCents: number;
     receiveAmountUsd: number;
     receiveAmount: number;
-    gasGwei: number;
-  }>;
+    gasGwei?: number;          // EVM only
+  }>>;
 }
 
 interface CancelDepositResponse {
@@ -683,14 +697,15 @@ interface PayoutCryptoAddressResponse {
   address: string;                  // 0x...
   chains: CryptoEvmChain[];
   tokens: PayoutCryptoToken[];
+  addresses: CryptoAddressEntry[];  // every live family; Solana lists every coin
 }
 
 // One row per (chain, tokenAddress). Each row is an independent withdrawable bucket.
 // No cross-chain liquidity — funds on chain X can only be withdrawn on chain X.
 interface PayoutCryptoBalance {
-  chain: string;                    // ethereum | base | arbitrum | optimism | bsc
+  chain: string;                    // a CryptoChain
   token: string;                    // USDT | USDC
-  tokenAddress: string;             // ERC-20 contract on this chain (lowercased)
+  tokenAddress: string;             // ERC-20 (lowercased), TRC-20 or SPL mint (as given)
   balanceCents: string;             // USD cents, bigint as decimal string
 }
 
@@ -699,13 +714,13 @@ interface PayoutBalancesResponse {
 }
 
 interface PayoutQuoteBody {
-  chain: CryptoEvmChain;
+  chain: CryptoChain;
   token: PayoutCryptoToken;
   amountCents: string;              // bigint as decimal string
 }
 
 // All fees pre-multiplied by the configured payout fee multiplier (default 1.5).
-// L2 chains (Base, Arbitrum, Optimism) return all-"0" stats.
+// L2 chains (Base, Arbitrum, Optimism) and Solana return all-"0" stats; Tron its flat fee.
 interface PayoutQuoteStats24h {
   minFeeUsdCents: string;
   p25FeeUsdCents: string;
@@ -718,16 +733,16 @@ interface PayoutQuoteResponse {
   chain: string;
   token: string;
   amountCents: string;
-  liveFeeUsdCents: string;          // live network gas; "0" on L2 chains
+  liveFeeUsdCents: string;          // live network gas; "0" on L2s and Solana, flat on Tron
   liveTotalDebitCents: string;      // amountCents + liveFeeUsdCents
   stats24h: PayoutQuoteStats24h;
   computedAt: string;               // ISO-8601
 }
 
 interface PayoutWithdrawBody {
-  chain: CryptoEvmChain;
+  chain: CryptoChain;
   token: PayoutCryptoToken;
-  destination: string;              // 0x...
+  destination: string;              // 0x... | T... | Solana wallet (never a token account)
   amountCents: string;              // bigint USD cents
   externalId: string;               // your idempotency key, unique per merchant
   forSubUser?: string;              // sub-user UUID OR your externalId for them; label only

@@ -164,9 +164,9 @@ Cross-cutting errors that any endpoint can return.
 | 1607 | `INVALID_SIGNATURE` | 401 | Gateway callback signature failed. |
 | 1608 | `GATEWAY_ERROR` | 502 | Payment gateway returned an error. |
 
-## Crypto deposits / withdrawals (1800–1811)
+## Crypto deposits / withdrawals (1800–1811, 1829)
 
-Self-hosted EVM deposit/withdrawal/transfer.
+Self-hosted crypto deposit/withdrawal/transfer (EVM, Tron, Solana).
 
 | Code | Key | HTTP | Meaning |
 |---|---|---|---|
@@ -182,6 +182,7 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 1809 | `CRYPTO_WEBHOOK_INVALID` | 401 | Webhook signature bad. |
 | 1810 | `CRYPTO_SELF_TRANSFER` | 422 | Cannot transfer to your own wallet. |
 | 1811 | `CRYPTO_RECIPIENT_WALLET_MISSING` | 422 | Recipient has no wallet for this currency. |
+| 1829 | `CRYPTO_ADDRESS_LIMIT` | 409 | Your sub-users hold the maximum of open Solana deposit accounts. Idle ones close after a day; retry later. |
 
 ## Partner crypto payout custody (1820–1827)
 

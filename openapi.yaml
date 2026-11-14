@@ -256,6 +256,35 @@ components:
     CryptoEvmChain:
       type: string
       enum: [ethereum, base, arbitrum, optimism, bsc]
+    CryptoChain:
+      type: string
+      enum: [ethereum, base, arbitrum, optimism, bsc, tron, solana]
+      description: Every chain the rail can run on. Which ones are live is in the address routes.
+    CryptoAddressFamily:
+      type: string
+      enum: [evm, tron, solana]
+    CryptoAddressEntry:
+      type: object
+      required: [family, chains, address, tokens]
+      additionalProperties: false
+      description: |
+        One deposit address per chain family. `address` is what the sender pays to: the same EVM
+        address on every EVM chain, a Tron address (`T…`) on Tron, a Solana wallet on Solana.
+      properties:
+        family: { $ref: '#/components/schemas/CryptoAddressFamily' }
+        chains:
+          type: array
+          items: { $ref: '#/components/schemas/CryptoChain' }
+        address: { type: string }
+        tokens:
+          type: array
+          items: { type: string, enum: [USDT, USDC] }
+        tokenAccounts:
+          type: object
+          additionalProperties: { type: string }
+          description: |
+            Solana only. The token account each coin lands in, by symbol. Senders pay the
+            `address` wallet; most wallets resolve the token account themselves.
     CryptoNativeToken:
       type: string
       enum: [USDT, USDC, NATIVE]
@@ -688,18 +717,23 @@ components:
                 country: { type: [string, "null"] }
     CryptoAddressResponse:
       type: object
-      required: [address, chains, tokens]
+      required: [address, chains, tokens, addresses]
       properties:
         address:
           type: string
           pattern: '^0x[a-fA-F0-9]{40}$'
-          description: Same EVM address across all supported chains.
+          description: Same EVM address across all supported EVM chains.
         chains:
           type: array
           items: { $ref: '#/components/schemas/CryptoEvmChain' }
         tokens:
           type: array
           items: { $ref: '#/components/schemas/CryptoNativeToken' }
+        addresses:
+          type: array
+          items: { $ref: '#/components/schemas/CryptoAddressEntry' }
+          description: |
+            Every live chain family, EVM first. The top-level fields repeat the EVM entry.
 
     CryptoQuoteBody:
       type: object
@@ -711,12 +745,14 @@ components:
 
     CryptoQuoteChainPreview:
       type: object
-      required: [feeCents, receiveAmountUsd, receiveAmount, gasGwei]
+      required: [feeCents, receiveAmountUsd, receiveAmount]
       properties:
         feeCents: { type: integer }
         receiveAmountUsd: { type: number }
         receiveAmount: { type: number }
-        gasGwei: { type: number }
+        gasGwei:
+          type: number
+          description: EVM chains only. Tron charges a flat fee and Solana none.
 
     CryptoQuoteResponse:
       type: object
@@ -730,7 +766,7 @@ components:
         chains:
           type: object
           additionalProperties: { $ref: '#/components/schemas/CryptoQuoteChainPreview' }
-          description: Map of `CryptoEvmChain` → preview (fees, gas, receive amount).
+          description: Map of `CryptoChain` → preview (fees, gas, receive amount). Only live chains appear.
 
     # ─────────────────────────────────────────────────────────────────────
     # Partner crypto payout custody
@@ -751,7 +787,7 @@ components:
 
     PayoutCryptoAddressResponse:
       type: object
-      required: [address, chains, tokens]
+      required: [address, chains, tokens, addresses]
       description: |
         Distinct from the spot deposit forwarder (`/deposit/crypto/address`). Funds sent to the
         payout address credit the partner's payout custody balance, **not** the spot wallet.
@@ -759,13 +795,17 @@ components:
         address:
           type: string
           pattern: '^0x[a-fA-F0-9]{40}$'
-          description: Same EVM address across all supported chains (CREATE2).
+          description: Same EVM address across all supported EVM chains (CREATE2).
         chains:
           type: array
           items: { $ref: '#/components/schemas/CryptoEvmChain' }
         tokens:
           type: array
           items: { $ref: '#/components/schemas/PayoutCryptoToken' }
+        addresses:
+          type: array
+          items: { $ref: '#/components/schemas/CryptoAddressEntry' }
+          description: Every live chain family, EVM first. Solana lists every coin with its token account.
 
     PayoutCryptoBalance:
       type: object
@@ -775,7 +815,9 @@ components:
         token: { type: string, example: USDC }
         tokenAddress:
           type: string
-          description: ERC-20 contract address for this token on this chain (lowercased).
+          description: |
+            The token's contract on this chain: an ERC-20 (lowercased) on EVM, a TRC-20 on Tron,
+            an SPL mint on Solana (both base58, as given).
         balanceCents:
           type: string
           description: USD cents, bigint as decimal string.
@@ -793,7 +835,7 @@ components:
       required: [chain, token, amountCents]
       additionalProperties: false
       properties:
-        chain: { $ref: '#/components/schemas/CryptoEvmChain' }
+        chain: { $ref: '#/components/schemas/CryptoChain' }
         token: { $ref: '#/components/schemas/PayoutCryptoToken' }
         amountCents:
           type: string
@@ -806,7 +848,8 @@ components:
       description: |
         Network fee distribution over the last ~24h derived from `eth_feeHistory`
         (1024 blocks). All values already multiplied by the configured fee multiplier.
-        L2 chains: all stats are `"0"` and the response shape stays stable.
+        L2 chains: all stats are `"0"` and the response shape stays stable. Tron and Solana
+        have no gas market: every stat is the flat fee (Tron) or `"0"` (Solana).
       properties:
         minFeeUsdCents: { type: string }
         p25FeeUsdCents: { type: string }
@@ -823,7 +866,9 @@ components:
         amountCents: { type: string }
         liveFeeUsdCents:
           type: string
-          description: Current network fee in USD cents. `"0"` on L2 chains (Base, Arbitrum, Optimism).
+          description: |
+            Current network fee in USD cents. `"0"` on L2 chains (Base, Arbitrum, Optimism) and
+            Solana. Tron charges a flat fee, waived from $10,000.
         liveTotalDebitCents:
           type: string
           description: '`amountCents + liveFeeUsdCents` — what would be deducted from the payout custody if the partner submitted now.'
@@ -835,12 +880,16 @@ components:
       required: [chain, token, destination, amountCents, externalId]
       additionalProperties: false
       properties:
-        chain: { $ref: '#/components/schemas/CryptoEvmChain' }
+        chain: { $ref: '#/components/schemas/CryptoChain' }
         token: { $ref: '#/components/schemas/PayoutCryptoToken' }
         destination:
           type: string
-          pattern: '^0x[a-fA-F0-9]{40}$'
-          description: EVM address that will receive the funds on-chain.
+          minLength: 26
+          maxLength: 64
+          description: |
+            The address that receives the funds, in the chain's own format: `0x…` on EVM, `T…`
+            on Tron, a Solana wallet on Solana. A Solana token account is refused (`1806`):
+            pay the wallet, and the coin lands in its token account.
         amountCents:
           type: string
           pattern: '^\d+$'
@@ -2905,12 +2954,21 @@ paths:
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required.
 
-        Same EVM address across all supported chains; idempotent (the address is
+        Same EVM address across all supported EVM chains; idempotent (the address is
         provisioned on first call and cached). Listed `tokens` are accepted at
         launch — sending other ERC-20s will result in `deposit.failed` with
         reason `unsupported_token`.
+
+        `addresses` lists every live chain family. Tron gets its own `T…` address. Solana
+        opens one token account per coin, so it is listed only for the coin named in
+        `token`: ask for the coin the user picked.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
+        - name: token
+          in: query
+          required: false
+          schema: { type: string, enum: [USDT, USDC] }
+          description: The coin to list a Solana address for. Without it, Solana is left out.
       responses:
         '200':
           description: OK.
@@ -2924,6 +2982,11 @@ paths:
                       data: { $ref: '#/components/schemas/CryptoAddressResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            `1829 CRYPTO_ADDRESS_LIMIT` — the merchant's sub-users already hold the maximum of
+            open Solana accounts. Idle accounts close after a day; retry later.
+        '422': { $ref: '#/components/responses/ValidationFailed' }
     post:
       operationId: declareCryptoDepositVat
       tags: [Deposits]
@@ -3002,7 +3065,8 @@ paths:
       description: |
         **Auth context:** merchant — no `On-Behalf-Of`. Requires `cryptoPayoutEnabled=true`.
 
-        Returns a **distinct** EVM forwarder address dedicated to partner-custody deposits.
+        Returns a **distinct** forwarder address dedicated to partner-custody deposits, plus
+        one per live non-EVM family in `addresses` (Tron, and Solana with every coin).
         Funds sent here are credited to the merchant's payout balance (per-(chain, token)
         sidecar), **not** the spot wallet. This address is allocated lazily on first call
         and cached forever.
@@ -3067,7 +3131,8 @@ paths:
         distribution over the last ~24h so you can decide whether *now* is a good moment.
         Purely advisory — no state is mutated.
 
-        On L2 chains (Base, Arbitrum, Optimism), fees are `"0"` and stats are all `"0"`.
+        On L2 chains (Base, Arbitrum, Optimism) and Solana, fees are `"0"` and stats are all
+        `"0"`. Tron charges a flat fee, waived from $10,000.
       requestBody:
         required: true
         content:
@@ -3161,8 +3226,9 @@ paths:
             - `1010 WITHDRAWAL_DAILY_LIMIT` — payout counts against the daily withdrawal cap.
             - `1504 INVALID_AMOUNT` — `amountCents` is not a positive value.
             - `1803 CRYPTO_TOKEN_NOT_SUPPORTED` — token not in MVP allow-list for the chain.
-            - `1806 CRYPTO_INVALID_DESTINATION` — destination is zero address, treasury,
-              or one of the merchant's own forwarders.
+            - `1806 CRYPTO_INVALID_DESTINATION` — destination is not an address on that chain,
+              is the zero address, one of ours, one of the merchant's own deposit addresses, or
+              a Solana token account instead of a wallet.
             - `1821 CRYPTO_PAYOUT_FEE_EXCEEDS_MAX` — live fee > `maxFeeUsdCents`.
             - `1822 CRYPTO_PAYOUT_INSUFFICIENT_BALANCE` — sidecar < `amountCents + fee`.
             - `1823 CRYPTO_PAYOUT_NO_CALLBACK_URL` — no active `CallbackUrl` registered.
@@ -3192,7 +3258,7 @@ paths:
           schema: { $ref: '#/components/schemas/PayoutWithdrawalStatus' }
         - name: chain
           in: query
-          schema: { $ref: '#/components/schemas/CryptoEvmChain' }
+          schema: { $ref: '#/components/schemas/CryptoChain' }
         - name: forUserId
           in: query
           schema: { type: string, format: uuid }

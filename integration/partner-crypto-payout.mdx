@@ -5,8 +5,8 @@ description: "Separate per-merchant USD-denominated crypto custody — deposit U
 
 Partner Payout Custody is a **second** wallet behind your merchant account
 that's intentionally **walled off** from the spot/skin-buying pipeline. You
-deposit USDT or USDC; we hold it; you instruct withdrawals to any EVM
-address. Useful when you want to use SkinShark as the crypto rail for your
+deposit USDT or USDC; we hold it; you instruct withdrawals to any address on
+a supported chain (EVM, Tron, Solana). Useful when you want to use SkinShark as the crypto rail for your
 own user payouts without commingling funds with skin-trading flows.
 
 ## Mental model
@@ -62,7 +62,9 @@ GET /user/wallet/payout/crypto/address
 api-key: sk_live_...
 ```
 
-Returns a CREATE2-derived EVM address valid on all supported chains.
+Returns a CREATE2-derived EVM address valid on all supported EVM chains, plus
+one address per live non-EVM family in `addresses` (a `T…` address on Tron, a
+wallet on Solana).
 **This address is distinct from your spot deposit forwarder.** Sending
 funds to the spot forwarder credits your spot wallet (and funds skin
 buys); sending to the payout forwarder credits your partner custody.
@@ -71,10 +73,23 @@ Don't confuse them.
 ```json
 {
   "address": "0x6b3a...c41e",
-  "chains": ["ethereum", "base", "arbitrum", "optimism", "bsc"],
-  "tokens": ["USDT", "USDC"]
+  "chains": ["ethereum", "bsc"],
+  "tokens": ["USDT", "USDC"],
+  "addresses": [
+    { "family": "evm", "chains": ["ethereum", "bsc"], "address": "0x6b3a...c41e", "tokens": ["USDT", "USDC"] },
+    { "family": "tron", "chains": ["tron"], "address": "TQ5n...8kVd", "tokens": ["USDT"] },
+    {
+      "family": "solana",
+      "chains": ["solana"],
+      "address": "7xKp...Qm2f",
+      "tokens": ["USDC", "USDT"],
+      "tokenAccounts": { "USDC": "3Fh2...aZ9w", "USDT": "9cLr...Tt4e" }
+    }
+  ]
 }
 ```
+
+On Solana, send to the wallet `address`: the coin lands in its token account.
 
 ### 2. Fund the address
 
@@ -85,7 +100,9 @@ Send USDT or USDC on any supported chain. Once confirmed:
 - We emit `payout.crypto.deposit.completed` to your callback URL.
 
 There's a $1 minimum per deposit (gas-aware floor — below this we don't
-credit because the sweep economics break down).
+credit because the sweep economics break down). On Tron the minimum is $10:
+smaller deposits wait up to 72 hours for others on the same address to reach
+it, and are then credited together.
 
 ### 3. List balances
 
@@ -110,7 +127,8 @@ combination you've ever deposited to.
 ### Preview the fee first
 
 The withdrawal fee reflects current network gas. On L2 chains (Base,
-Arbitrum, Optimism) the fee is `0`.
+Arbitrum, Optimism) and Solana the fee is `0`. Tron charges a flat fee,
+waived from $10,000.
 
 ```http
 POST /user/wallet/payout/crypto/withdraw/quote
@@ -166,7 +184,7 @@ Content-Type: application/json
 | Field | Notes |
 |---|---|
 | `chain`, `token` | The bucket you're drawing from. Must match a sidecar row with enough balance. |
-| `destination` | Any valid EVM address. Cannot be your own forwarder or the SkinShark treasury. |
+| `destination` | An address in the chain's own format: `0x…` on EVM, `T…` on Tron, a wallet on Solana (a Solana token account is refused). Cannot be one of your own deposit addresses or ours. |
 | `amountCents` | USD cents to send to `destination`. Fee is added on top. |
 | `externalId` | **Required.** Your idempotency key. Must be unique per merchant. We echo this back in the approval callback so you can match against your records. |
 | `forSubUser` | **Optional label.** Sub-user UUID or your `externalId` for them. Funds always come from your merchant custody — this just tags the withdrawal for your audit/reporting. |
