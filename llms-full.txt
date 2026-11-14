@@ -23,7 +23,7 @@ dashboard runs on.
   <Card title="Fund wallets" href="/integration/full-platform">
     Move balance from your merchant account to any sub-user with idempotent
     transfers, or accept deposits via Gate Pay, on-ramp cards, or self-hosted
-    EVM crypto.
+    crypto on EVM chains, Tron and Solana.
   </Card>
   <Card title="Buy items" href="/api-reference/buymarketitems">
     Buy specific listings or hand the server a target item and let it pick
@@ -2065,8 +2065,8 @@ Separate per-merchant USD-denominated crypto custody — deposit USDT/USDC, then
 
 Partner Payout Custody is a **second** wallet behind your merchant account
 that's intentionally **walled off** from the spot/skin-buying pipeline. You
-deposit USDT or USDC; we hold it; you instruct withdrawals to any EVM
-address. Useful when you want to use SkinShark as the crypto rail for your
+deposit USDT or USDC; we hold it; you instruct withdrawals to any address on
+a supported chain (EVM, Tron, Solana). Useful when you want to use SkinShark as the crypto rail for your
 own user payouts without commingling funds with skin-trading flows.
 
 ## Mental model
@@ -2122,7 +2122,9 @@ GET /user/wallet/payout/crypto/address
 api-key: sk_live_...
 ```
 
-Returns a CREATE2-derived EVM address valid on all supported chains.
+Returns a CREATE2-derived EVM address valid on all supported EVM chains, plus
+one address per live non-EVM family in `addresses` (a `T…` address on Tron, a
+wallet on Solana).
 **This address is distinct from your spot deposit forwarder.** Sending
 funds to the spot forwarder credits your spot wallet (and funds skin
 buys); sending to the payout forwarder credits your partner custody.
@@ -2131,10 +2133,23 @@ Don't confuse them.
 ```json
 {
   "address": "0x6b3a...c41e",
-  "chains": ["ethereum", "base", "arbitrum", "optimism", "bsc"],
-  "tokens": ["USDT", "USDC"]
+  "chains": ["ethereum", "bsc"],
+  "tokens": ["USDT", "USDC"],
+  "addresses": [
+    { "family": "evm", "chains": ["ethereum", "bsc"], "address": "0x6b3a...c41e", "tokens": ["USDT", "USDC"] },
+    { "family": "tron", "chains": ["tron"], "address": "TQ5n...8kVd", "tokens": ["USDT"] },
+    {
+      "family": "solana",
+      "chains": ["solana"],
+      "address": "7xKp...Qm2f",
+      "tokens": ["USDC", "USDT"],
+      "tokenAccounts": { "USDC": "3Fh2...aZ9w", "USDT": "9cLr...Tt4e" }
+    }
+  ]
 }
 ```
+
+On Solana, send to the wallet `address`: the coin lands in its token account.
 
 ### 2. Fund the address
 
@@ -2145,7 +2160,9 @@ Send USDT or USDC on any supported chain. Once confirmed:
 - We emit `payout.crypto.deposit.completed` to your callback URL.
 
 There's a $1 minimum per deposit (gas-aware floor — below this we don't
-credit because the sweep economics break down).
+credit because the sweep economics break down). On Tron the minimum is $10:
+smaller deposits wait up to 72 hours for others on the same address to reach
+it, and are then credited together.
 
 ### 3. List balances
 
@@ -2170,7 +2187,8 @@ combination you've ever deposited to.
 ### Preview the fee first
 
 The withdrawal fee reflects current network gas. On L2 chains (Base,
-Arbitrum, Optimism) the fee is `0`.
+Arbitrum, Optimism) and Solana the fee is `0`. Tron charges a flat fee,
+waived from $10,000.
 
 ```http
 POST /user/wallet/payout/crypto/withdraw/quote
@@ -2226,7 +2244,7 @@ Content-Type: application/json
 | Field | Notes |
 |---|---|
 | `chain`, `token` | The bucket you're drawing from. Must match a sidecar row with enough balance. |
-| `destination` | Any valid EVM address. Cannot be your own forwarder or the SkinShark treasury. |
+| `destination` | An address in the chain's own format: `0x…` on EVM, `T…` on Tron, a wallet on Solana (a Solana token account is refused). Cannot be one of your own deposit addresses or ours. |
 | `amountCents` | USD cents to send to `destination`. Fee is added on top. |
 | `externalId` | **Required.** Your idempotency key. Must be unique per merchant. We echo this back in the approval callback so you can match against your records. |
 | `forSubUser` | **Optional label.** Sub-user UUID or your `externalId` for them. Funds always come from your merchant custody — this just tags the withdrawal for your audit/reporting. |
@@ -3086,7 +3104,7 @@ type TradeEvent = {
 
 ### Discriminating deposits
 
-Gateway-hosted deposits (Gate Pay, on-ramp) and self-hosted EVM crypto
+Gateway-hosted deposits (Gate Pay, on-ramp) and self-hosted crypto
 share event names but carry different keys:
 
 | Event | Gateway | Self-hosted crypto |
@@ -3802,6 +3820,8 @@ type OnrampPayCurrency = "USD" | "EUR" | "GBP";
 
 type CryptoEvmChain = "ethereum" | "base" | "arbitrum" | "optimism" | "bsc";
 
+type CryptoChain = CryptoEvmChain | "tron" | "solana";
+
 type CryptoNativeToken = "USDT" | "USDC" | "NATIVE";
 
 type TwoFactorMethod = "email" | "totp";
@@ -4356,11 +4376,23 @@ interface OnrampSessionResponse {
   whitelabelUrl: string;
 }
 
-// Self-hosted EVM crypto
+// Self-hosted crypto: EVM, Tron, Solana
+// One deposit address per chain family. `address` is what the sender pays to.
+interface CryptoAddressEntry {
+  family: "evm" | "tron" | "solana";
+  chains: CryptoChain[];
+  address: string;             // 0x... | T... | Solana wallet
+  tokens: ("USDT" | "USDC")[];
+  tokenAccounts?: Record<string, string>; // Solana only: the token account per coin
+}
+
+// GET /user/wallet/deposit/crypto/address?token=USDT|USDC
+// Solana is listed only for the coin named in `token`.
 interface CryptoAddressResponse {
-  address: string;             // 0x...
+  address: string;             // 0x..., the EVM entry repeated
   chains: CryptoEvmChain[];
   tokens: CryptoNativeToken[];
+  addresses: CryptoAddressEntry[]; // every live family, EVM first
 }
 
 interface CryptoQuoteBody {
@@ -4374,12 +4406,12 @@ interface CryptoQuoteResponse {
   walletCurrency: Currency;
   exchangeRate: number;
   feeBps: number;
-  chains: Record<CryptoEvmChain, {
+  chains: Partial<Record<CryptoChain, { // live chains only
     feeCents: number;
     receiveAmountUsd: number;
     receiveAmount: number;
-    gasGwei: number;
-  }>;
+    gasGwei?: number;          // EVM only
+  }>>;
 }
 
 interface CancelDepositResponse {
@@ -4416,14 +4448,15 @@ interface PayoutCryptoAddressResponse {
   address: string;                  // 0x...
   chains: CryptoEvmChain[];
   tokens: PayoutCryptoToken[];
+  addresses: CryptoAddressEntry[];  // every live family; Solana lists every coin
 }
 
 // One row per (chain, tokenAddress). Each row is an independent withdrawable bucket.
 // No cross-chain liquidity — funds on chain X can only be withdrawn on chain X.
 interface PayoutCryptoBalance {
-  chain: string;                    // ethereum | base | arbitrum | optimism | bsc
+  chain: string;                    // a CryptoChain
   token: string;                    // USDT | USDC
-  tokenAddress: string;             // ERC-20 contract on this chain (lowercased)
+  tokenAddress: string;             // ERC-20 (lowercased), TRC-20 or SPL mint (as given)
   balanceCents: string;             // USD cents, bigint as decimal string
 }
 
@@ -4432,13 +4465,13 @@ interface PayoutBalancesResponse {
 }
 
 interface PayoutQuoteBody {
-  chain: CryptoEvmChain;
+  chain: CryptoChain;
   token: PayoutCryptoToken;
   amountCents: string;              // bigint as decimal string
 }
 
 // All fees pre-multiplied by the configured payout fee multiplier (default 1.5).
-// L2 chains (Base, Arbitrum, Optimism) return all-"0" stats.
+// L2 chains (Base, Arbitrum, Optimism) and Solana return all-"0" stats; Tron its flat fee.
 interface PayoutQuoteStats24h {
   minFeeUsdCents: string;
   p25FeeUsdCents: string;
@@ -4451,16 +4484,16 @@ interface PayoutQuoteResponse {
   chain: string;
   token: string;
   amountCents: string;
-  liveFeeUsdCents: string;          // live network gas; "0" on L2 chains
+  liveFeeUsdCents: string;          // live network gas; "0" on L2s and Solana, flat on Tron
   liveTotalDebitCents: string;      // amountCents + liveFeeUsdCents
   stats24h: PayoutQuoteStats24h;
   computedAt: string;               // ISO-8601
 }
 
 interface PayoutWithdrawBody {
-  chain: CryptoEvmChain;
+  chain: CryptoChain;
   token: PayoutCryptoToken;
-  destination: string;              // 0x...
+  destination: string;              // 0x... | T... | Solana wallet (never a token account)
   amountCents: string;              // bigint USD cents
   externalId: string;               // your idempotency key, unique per merchant
   forSubUser?: string;              // sub-user UUID OR your externalId for them; label only
@@ -4746,9 +4779,9 @@ Cross-cutting errors that any endpoint can return.
 | 1607 | `INVALID_SIGNATURE` | 401 | Gateway callback signature failed. |
 | 1608 | `GATEWAY_ERROR` | 502 | Payment gateway returned an error. |
 
-## Crypto deposits / withdrawals (1800–1811)
+## Crypto deposits / withdrawals (1800–1811, 1829)
 
-Self-hosted EVM deposit/withdrawal/transfer.
+Self-hosted crypto deposit/withdrawal/transfer (EVM, Tron, Solana).
 
 | Code | Key | HTTP | Meaning |
 |---|---|---|---|
@@ -4764,6 +4797,7 @@ Self-hosted EVM deposit/withdrawal/transfer.
 | 1809 | `CRYPTO_WEBHOOK_INVALID` | 401 | Webhook signature bad. |
 | 1810 | `CRYPTO_SELF_TRANSFER` | 422 | Cannot transfer to your own wallet. |
 | 1811 | `CRYPTO_RECIPIENT_WALLET_MISSING` | 422 | Recipient has no wallet for this currency. |
+| 1829 | `CRYPTO_ADDRESS_LIMIT` | 409 | Your sub-users hold the maximum of open Solana deposit accounts. Idle ones close after a day; retry later. |
 
 ## Partner crypto payout custody (1820–1827)
 
@@ -5298,10 +5332,14 @@ credited; subscribe to `deposit.completed` WS events to react.
 
 **Auth context:** sub-user — `On-Behalf-Of` required.
 
-Same EVM address across all supported chains; idempotent (the address is
+Same EVM address across all supported EVM chains; idempotent (the address is
 provisioned on first call and cached). Listed `tokens` are accepted at
 launch — sending other ERC-20s will result in `deposit.failed` with
 reason `unsupported_token`.
+
+`addresses` lists every live chain family. Tron gets its own `T…` address. Solana
+opens one token account per coin, so it is listed only for the coin named in
+`token`: ask for the coin the user picked.
 
 ### POST /user/wallet/deposit/crypto/address
 
@@ -5333,7 +5371,8 @@ token + amount. Used to show the sub-user the cheapest network.
 
 **Auth context:** merchant — no `On-Behalf-Of`. Requires `cryptoPayoutEnabled=true`.
 
-Returns a **distinct** EVM forwarder address dedicated to partner-custody deposits.
+Returns a **distinct** forwarder address dedicated to partner-custody deposits, plus
+one per live non-EVM family in `addresses` (Tron, and Solana with every coin).
 Funds sent here are credited to the merchant's payout balance (per-(chain, token)
 sidecar), **not** the spot wallet. This address is allocated lazily on first call
 and cached forever.
@@ -5365,7 +5404,8 @@ Returns the current network fee (`liveFeeUsdCents`) plus a min/p25/avg/p75/max
 distribution over the last ~24h so you can decide whether *now* is a good moment.
 Purely advisory — no state is mutated.
 
-On L2 chains (Base, Arbitrum, Optimism), fees are `"0"` and stats are all `"0"`.
+On L2 chains (Base, Arbitrum, Optimism) and Solana, fees are `"0"` and stats are all
+`"0"`. Tron charges a flat fee, waived from $10,000.
 
 ### POST /user/wallet/payout/crypto/withdraw
 
