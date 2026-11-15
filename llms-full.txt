@@ -2769,7 +2769,7 @@ interface WebhookEnvelope {
   data:
     | {
         trade: Trade;                   // same shape as GET /merchant/trades/{id}
-        settlement?: { houseFeeCents: number; merchantFeeCents: number };
+        settlement?: { merchantFeeCents: number };
         refund?: {                      // trade.refunded — one per refunded item
           itemId: string;               // matches TradeItem.id
           externalId?: string;          // your own per-item ref, when you supplied one
@@ -3399,7 +3399,6 @@ const build = await api<BookExport>("/market/export", { method: "GET" });
   "seq": 18342,
   "builtAt": "2026-10-29T14:05:00.000Z",
   "listings": 2481337,
-  "feeBps": 250,
   "level": "full",
   "files": [
     { "url": "https://…", "rows": 155083, "bytes": 9718231, "sha256": "3f1c9b0e…" }
@@ -3517,11 +3516,11 @@ Refusals happen before the upgrade, as an HTTP status with the standard
 On connect the server sends:
 
 ```json
-{ "type": "hello", "epoch": "1761746400000", "seq": 18342, "level": "extended", "feeBps": 250, "firehose": false, "itemCap": 5000 }
+{ "type": "hello", "epoch": "1761746400000", "seq": 18342, "level": "extended", "firehose": false, "itemCap": 5000 }
 ```
 
-`epoch` and `seq` are the stream's current position; `level`, `feeBps`,
-`firehose` and `itemCap` are your entitlement and price tier.
+`epoch` and `seq` are the stream's current position; `level`, `firehose` and
+`itemCap` are your entitlement.
 
 ### Subscribe
 
@@ -3822,10 +3821,8 @@ interface MerchantProfile {
   roles: Role[];
   twoFactorEnabled: boolean;
   twoFactorMethod: TwoFactorMethod | null;
-  feeBps: number;             // house fee on merchant's own buys
   buyFeeBps: number;          // merchant's cut on sub-user buys
   sellFeeBps: number;         // merchant's cut on sub-user sells, off the payout
-  childDefaultFeeBps: number | null;
   wallets: {
     spot: { currency: string; balance: number } | null;
     earnings: { currency: string; balance: number } | null;
@@ -3833,12 +3830,9 @@ interface MerchantProfile {
   createdAt: string;
 }
 
-interface FeesResponse {
+interface FeesResponse {   // your own cuts, paid into your earnings wallet
   buyFeeBps: number;
   sellFeeBps: number;
-  childDefaultFeeBps: number | null;
-  globalDefaultFeeBps: number;
-  effectiveChildFeeBps: number;
 }
 
 interface MerchantStats {
@@ -3882,7 +3876,6 @@ interface SubUserListItem {
   steamId: string | null;
   externalId: string | null;
   status: UserStatus;
-  feeBps: number | null;
   currency: Currency | null;
   balance: number;
   createdAt: string;
@@ -3909,7 +3902,6 @@ interface CreateSubUserResponse {
   steamId: string | null;
   externalId: string | null;
   status: UserStatus;
-  feeBps: number | null;
   createdAt: string;
   currency: Currency;
   /** True when the response replays a prior create with the same externalId. */
@@ -3922,7 +3914,6 @@ interface SubUserResponse {
   steamId: string | null;
   externalId: string | null;
   status: UserStatus;
-  feeBps: number | null;
   createdAt: string;
   wallet: {                    // single object — sub-users only have one wallet
     type: WalletType;
@@ -4338,7 +4329,7 @@ interface PayoutQuoteBody {
   amountCents: string;              // bigint as decimal string
 }
 
-// All fees pre-multiplied by the configured payout fee multiplier (default 1.5).
+// Fees in USD cents, as a payout would be charged.
 // L2 chains (Base, Arbitrum, Optimism) and Solana return all-"0" stats; Tron its flat fee.
 interface PayoutQuoteStats24h {
   minFeeUsdCents: string;
@@ -4688,7 +4679,7 @@ Self-hosted crypto deposit/withdrawal/transfer (EVM, Tron, Solana).
 | 1941 | `STEAM_ID_TAKEN` | 409 | Sub-user creation: Steam account already registered. |
 | 1942 | `EXTERNAL_ID_TAKEN` | 409 | Sub-user creation: `externalId` already taken by a different sub-user. |
 | 1943 | `SUB_USER_HAS_BALANCE` | 422 | Can't delete: balance is non-zero. |
-| 1950 | `INVALID_FEE_BPS` | 422 | `feeBps` out of range (0–5000). |
+| 1950 | `INVALID_FEE_BPS` | 422 | `buyFeeBps` or `sellFeeBps` out of range (0–5000). |
 
 ## Marketplace (2000–2041)
 
@@ -4944,9 +4935,8 @@ spot/earnings balances.
 
 **Auth context:** merchant only.
 
-Returns the merchant's `buyFeeBps` and `sellFeeBps`, the per-merchant default house
-fee for new sub-users, the global default, and the resolved effective
-child fee (`childDefaultFeeBps ?? globalDefaultFeeBps`).
+Returns your `buyFeeBps` and `sellFeeBps`: what you charge your sub-users on buys and
+sells, paid into your earnings wallet.
 
 Fee configuration is read-only over the API. To adjust your merchant
 fee, sign in to the merchant dashboard.
@@ -4980,9 +4970,6 @@ with `STEAM_ID_TAKEN`. The same SteamID64 may exist under another merchant —
 uniqueness is scoped to you, never global. `email` is optional and may be
 shared by several of your sub-users. `externalId` is your own stable
 identifier and can be used in subsequent calls (path params, `On-Behalf-Of`).
-
-New sub-users inherit the merchant's `feeBps` (per-merchant default,
-falling back to the global default).
 
 ### GET /merchant/users/{id}
 
