@@ -53,8 +53,6 @@ Endpoints that accept money take **decimal strings**:
 | `POST /merchant/users/{id}/fund` | `amount` | `"25.00"` |
 | `POST /market/buy` (`items[].maxPrice`) | `maxPrice` | `"1.50"` |
 | `POST /market/buy/quick` | `maxPrice` | `"1.50"` |
-| `POST /user/wallet/deposit/gate/quote` | `amount` | `"100.00"` |
-| `POST /user/wallet/deposit/onramp/quote` | `payAmount` / `receiveAmount` | `100.00` (number, fine for on-ramp) |
 | `POST /user/wallet/deposit/crypto/quote` | `amount` | `100.00` (number, ≤ $10M) |
 
 The decimal-string format (`"25.00"`) avoids floating-point loss on the
@@ -99,4 +97,3 @@ after padding.
 ## Currency
 
 Every wallet, merchant and sub-user alike, holds USD, and every `currency` field reads `USD`.
-Card deposits through Onramp can still be paid in EUR or GBP; they credit the wallet in USD.

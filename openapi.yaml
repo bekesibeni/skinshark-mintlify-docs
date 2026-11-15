@@ -147,7 +147,7 @@ tags:
   - name: Wallet
     description: Actor's spot balance and ledger. Merchant or sub-user context.
   - name: Deposits
-    description: Fund the actor's wallet via Gate Pay, on-ramp (card), or self-hosted EVM crypto. Merchant or sub-user context.
+    description: Fund the actor's wallet with self-hosted EVM crypto. Merchant or sub-user context.
   - name: Partner Payout Custody
     description: |
       Separate per-merchant USD-denominated crypto custody (USDT/USDC at MVP). Funds deposited here
@@ -248,11 +248,9 @@ components:
     DepositStatus:
       type: string
       enum: [initiated, pending, completed, partial, expired, cancelled, refunded, failed]
-    DepositMethod: { type: string, enum: [gatepay, onramp, crypto] }
     DepositCurrency:
       type: string
       enum: [USDT, USDC, DAI, BTC, ETH, SOL]
-    OnrampPayCurrency: { type: string, enum: [USD, EUR, GBP] }
     CryptoEvmChain:
       type: string
       enum: [ethereum, base, arbitrum, optimism, bsc]
@@ -550,143 +548,6 @@ components:
         nextCursor: { type: [string, "null"] }
 
     # ─────────────────────────────────────────────────────────────────────
-    # Deposits — Gate Pay (gateway-hosted crypto)
-    # ─────────────────────────────────────────────────────────────────────
-    DepositChainsResponse:
-      type: object
-      required: [currencies]
-      properties:
-        currencies:
-          type: array
-          items:
-            type: object
-            required: [currency, chains, isStable, minDepositUsd]
-            properties:
-              currency: { $ref: '#/components/schemas/DepositCurrency' }
-              chains:
-                type: array
-                items: { type: string }
-              isStable: { type: boolean }
-              minDepositUsd: { type: number, minimum: 0 }
-
-    DepositQuoteBody:
-      type: object
-      required: [currency, amount]
-      additionalProperties: false
-      properties:
-        currency: { $ref: '#/components/schemas/DepositCurrency' }
-        amount:
-          type: string
-          pattern: '^\d+(\.\d{1,2})?$'
-          description: Decimal USD amount.
-
-    DepositQuoteResponse:
-      type: object
-      required:
-        [token, currency, payAmountToken, receiveAmountUsd, receiveAmount, fee, exchangeRate, quoteToken, expiresIn]
-      properties:
-        token: { $ref: '#/components/schemas/DepositCurrency' }
-        currency: { $ref: '#/components/schemas/Currency' }
-        payAmountToken: { type: number, minimum: 0 }
-        receiveAmountUsd: { type: number, minimum: 0 }
-        receiveAmount: { type: number, minimum: 0 }
-        fee: { type: number, minimum: 0 }
-        exchangeRate: { type: number, minimum: 0 }
-        quoteToken:
-          type: string
-          description: Pass to `POST /user/wallet/deposit/gate` to commit.
-        expiresIn: { type: string, example: "5m" }
-
-    CreateDepositBody:
-      type: object
-      required: [quoteToken, chain]
-      additionalProperties: false
-      properties:
-        quoteToken: { type: string }
-        chain: { type: string, minLength: 1, maxLength: 30 }
-
-    CreateDepositResponse:
-      type: object
-      required:
-        [fundingId, status, currency, payAmountToken, receiveAmountUsd, receiveAmount, exchangeRate, fee, expireTime, whitelabelUrl, onChain]
-      properties:
-        fundingId: { type: string, format: uuid }
-        status: { $ref: '#/components/schemas/DepositStatus' }
-        currency: { $ref: '#/components/schemas/Currency' }
-        payAmountToken: { type: number }
-        receiveAmountUsd: { type: number }
-        receiveAmount: { type: number }
-        exchangeRate: { type: number }
-        fee: { type: number }
-        expireTime: { type: [integer, "null"] }
-        whitelabelUrl: { type: [string, "null"], format: uri }
-        onChain:
-          type: object
-          required: [network, token, address]
-          properties:
-            network: { type: string }
-            token: { $ref: '#/components/schemas/DepositCurrency' }
-            address: { type: string }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Deposits — On-ramp (card)
-    # ─────────────────────────────────────────────────────────────────────
-    OnrampQuoteBody:
-      type: object
-      required: [payCurrency]
-      additionalProperties: false
-      description: Provide either `payAmount` or `receiveAmount`.
-      properties:
-        payAmount: { type: number, exclusiveMinimum: 0 }
-        receiveAmount: { type: number, exclusiveMinimum: 0 }
-        payCurrency: { $ref: '#/components/schemas/OnrampPayCurrency' }
-
-    OnrampQuoteResponse:
-      type: object
-      required:
-        [currency, payAmount, receiveAmount, receiveAmountUsd, payCurrency, exchangeRate, fees]
-      properties:
-        currency: { $ref: '#/components/schemas/Currency' }
-        payAmount: { type: number }
-        receiveAmount: { type: number }
-        receiveAmountUsd: { type: number }
-        payCurrency: { $ref: '#/components/schemas/OnrampPayCurrency' }
-        exchangeRate: { type: number }
-        fees:
-          type: object
-          required: [onrampFee, clientFee, gatewayFee, gasFee]
-          properties:
-            onrampFee: { type: number }
-            clientFee: { type: number }
-            gatewayFee: { type: number }
-            gasFee: { type: number }
-
-    OnrampSessionBody:
-      allOf:
-        - $ref: '#/components/schemas/OnrampQuoteBody'
-        - type: object
-          properties:
-            redirectUrl: { type: string, format: uri }
-
-    OnrampSessionResponse:
-      type: object
-      required:
-        [fundingId, status, currency, payAmount, receiveAmount, receiveAmountUsd, payCurrency, exchangeRate, whitelabelUrl]
-      properties:
-        fundingId: { type: string, format: uuid }
-        status: { type: string, enum: [initiated, completed, failed] }
-        currency: { $ref: '#/components/schemas/Currency' }
-        payAmount: { type: number }
-        receiveAmount: { type: number }
-        receiveAmountUsd: { type: number }
-        payCurrency: { $ref: '#/components/schemas/OnrampPayCurrency' }
-        exchangeRate: { type: number }
-        whitelabelUrl:
-          type: string
-          format: uri
-          description: Redirect the sub-user here to complete card payment.
-
-    # ─────────────────────────────────────────────────────────────────────
     # Deposits — Self-hosted EVM crypto
     # ─────────────────────────────────────────────────────────────────────
     CryptoVatDeclarationBody:
@@ -963,33 +824,6 @@ components:
           type: array
           items: { $ref: '#/components/schemas/PayoutWithdrawalDetail' }
         nextCursor: { type: [string, "null"] }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Universal deposit cancel/resume
-    # ─────────────────────────────────────────────────────────────────────
-    CancelDepositResponse:
-      type: object
-      required: [depositId, status]
-      properties:
-        depositId: { type: string, format: uuid }
-        status: { $ref: '#/components/schemas/DepositStatus' }
-
-    ResumeDepositResponse:
-      type: object
-      required: [fundingId, status, method, currency, amount, whitelabelUrl]
-      properties:
-        fundingId: { type: string, format: uuid }
-        status: { $ref: '#/components/schemas/DepositStatus' }
-        method: { $ref: '#/components/schemas/DepositMethod' }
-        currency: { $ref: '#/components/schemas/Currency' }
-        amount: { type: number, minimum: 0 }
-        whitelabelUrl: { type: [string, "null"] }
-        onChain:
-          type: [object, "null"]
-          properties:
-            network: { type: string }
-            token: { type: string }
-            address: { type: string }
 
     # ─────────────────────────────────────────────────────────────────────
     # Sub-user profile + Steam trade URLs
@@ -1879,73 +1713,6 @@ components:
             userId: { type: string, format: uuid }
         ts: { type: integer, description: Unix epoch milliseconds. }
 
-    WsDepositTransferEvent:
-      type: object
-      description: |
-        Gateway transfer detected on-chain (gatepay). `status: pending`.
-        Replaced by `deposit.completed` once the gateway settles the credit.
-      required: [event, data, ts]
-      properties:
-        event: { type: string, enum: [deposit.transfer] }
-        data:
-          type: object
-          required: [fundingId, status, transfer]
-          properties:
-            fundingId: { type: string, format: uuid }
-            status: { type: string, enum: [pending] }
-            transfer:
-              type: object
-              required: [txHash, amount, chain]
-              properties:
-                txHash: { type: string }
-                amount: { type: number }
-                chain: { type: string }
-        ts: { type: integer }
-
-    WsGatewayDepositCompletedEvent:
-      type: object
-      description: Gatepay or on-ramp deposit credited.
-      required: [event, data, ts]
-      properties:
-        event: { type: string, enum: [deposit.completed] }
-        data:
-          type: object
-          required: [fundingId, status, payAmountToken, receiveAmountUsd, completedAt]
-          properties:
-            fundingId: { type: string, format: uuid }
-            status: { type: string, enum: [completed] }
-            payAmountToken: { type: number }
-            receiveAmountUsd: { type: number }
-            completedAt: { type: string, format: date-time }
-        ts: { type: integer }
-
-    WsDepositFailedEvent:
-      type: object
-      required: [event, data, ts]
-      properties:
-        event: { type: string, enum: [deposit.failed] }
-        data:
-          type: object
-          required: [fundingId, status, reason]
-          properties:
-            fundingId: { type: string, format: uuid }
-            status: { type: string, enum: [expired, failed, partial] }
-            reason: { type: string }
-        ts: { type: integer }
-
-    WsDepositRefundedEvent:
-      type: object
-      required: [event, data, ts]
-      properties:
-        event: { type: string, enum: [deposit.refunded] }
-        data:
-          type: object
-          required: [fundingId, status]
-          properties:
-            fundingId: { type: string, format: uuid }
-            status: { type: string, enum: [refunded] }
-        ts: { type: integer }
-
     WsCryptoDepositPendingEvent:
       type: object
       description: Self-hosted crypto deposit detected; awaiting confirmations.
@@ -2032,10 +1799,6 @@ components:
       description: Discriminated union of every server-pushed frame on `/ws`.
       oneOf:
         - $ref: '#/components/schemas/WsConnectedEvent'
-        - $ref: '#/components/schemas/WsDepositTransferEvent'
-        - $ref: '#/components/schemas/WsGatewayDepositCompletedEvent'
-        - $ref: '#/components/schemas/WsDepositFailedEvent'
-        - $ref: '#/components/schemas/WsDepositRefundedEvent'
         - $ref: '#/components/schemas/WsCryptoDepositPendingEvent'
         - $ref: '#/components/schemas/WsCryptoDepositCreditedEvent'
         - $ref: '#/components/schemas/WsCryptoDepositFailedEvent'
@@ -2785,165 +2548,6 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   # ─────────────────────────────────────────────────────────────────────
-  # SUB-USER DEPOSITS — Gate Pay
-  # ─────────────────────────────────────────────────────────────────────
-  /user/wallet/deposit/gate/chains:
-    get:
-      operationId: getGateDepositChains
-      tags: [Deposits]
-      summary: List Gate Pay chains
-      description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
-      parameters:
-        - { $ref: '#/components/parameters/OnBehalfOf' }
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data: { $ref: '#/components/schemas/DepositChainsResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /user/wallet/deposit/gate/quote:
-    post:
-      operationId: quoteGateDeposit
-      tags: [Deposits]
-      summary: Quote Gate Pay deposit
-      description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
-
-        Quote is short-lived (TTL embedded in `expiresIn`). Pass `quoteToken` to
-        the create endpoint to commit.
-      parameters:
-        - { $ref: '#/components/parameters/OnBehalfOf' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/DepositQuoteBody' }
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data: { $ref: '#/components/schemas/DepositQuoteResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
-        '429': { $ref: '#/components/responses/RateLimited' }
-
-  /user/wallet/deposit/gate:
-    post:
-      operationId: createGateDeposit
-      tags: [Deposits]
-      summary: Create Gate Pay deposit
-      description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
-
-        Returns either a hosted `whitelabelUrl` (redirect the sub-user there) or
-        an on-chain pay-to address — usually both. Settlement happens via the
-        gateway webhook; subscribe to `deposit.transfer` / `deposit.completed`
-        WS events for the sub-user.
-      parameters:
-        - { $ref: '#/components/parameters/OnBehalfOf' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateDepositBody' }
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data: { $ref: '#/components/schemas/CreateDepositResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
-        '429': { $ref: '#/components/responses/RateLimited' }
-
-  # ─────────────────────────────────────────────────────────────────────
-  # SUB-USER DEPOSITS — On-ramp (card)
-  # ─────────────────────────────────────────────────────────────────────
-  /user/wallet/deposit/onramp/quote:
-    post:
-      operationId: quoteOnrampDeposit
-      tags: [Deposits]
-      summary: Quote card deposit
-      description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**'
-      parameters:
-        - { $ref: '#/components/parameters/OnBehalfOf' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/OnrampQuoteBody' }
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data: { $ref: '#/components/schemas/OnrampQuoteResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
-        '429': { $ref: '#/components/responses/RateLimited' }
-
-  /user/wallet/deposit/onramp/session:
-    post:
-      operationId: createOnrampSession
-      tags: [Deposits]
-      summary: Create card deposit session
-      description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
-
-        Returns a `whitelabelUrl` to redirect the sub-user to. After payment,
-        the on-ramp partner posts a callback and the sub-user's wallet is
-        credited; subscribe to `deposit.completed` WS events to react.
-      parameters:
-        - { $ref: '#/components/parameters/OnBehalfOf' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/OnrampSessionBody' }
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data: { $ref: '#/components/schemas/OnrampSessionResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
-        '429': { $ref: '#/components/responses/RateLimited' }
-
-  # ─────────────────────────────────────────────────────────────────────
   # SUB-USER DEPOSITS — Self-hosted EVM crypto
   # ─────────────────────────────────────────────────────────────────────
   /user/wallet/deposit/crypto/address:
@@ -3223,7 +2827,6 @@ paths:
         '422':
           description: |
             One of:
-            - `1010 WITHDRAWAL_DAILY_LIMIT` — payout counts against the daily withdrawal cap.
             - `1504 INVALID_AMOUNT` — `amountCents` is not a positive value.
             - `1803 CRYPTO_TOKEN_NOT_SUPPORTED` — token not in MVP allow-list for the chain.
             - `1806 CRYPTO_INVALID_DESTINATION` — destination is not an address on that chain,
@@ -3306,66 +2909,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: '`1807 CRYPTO_WITHDRAWAL_NOT_FOUND`'
-
-  # ─────────────────────────────────────────────────────────────────────
-  # SUB-USER DEPOSITS — Universal cancel/resume
-  # ─────────────────────────────────────────────────────────────────────
-  /user/wallet/deposit/{id}/cancel:
-    post:
-      operationId: cancelDeposit
-      tags: [Deposits]
-      summary: Cancel deposit
-      description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required.
-
-        Works for `gatepay` and `onramp` deposits in non-final state (`initiated`,
-        `pending`, `partial`). No-op once the deposit is `completed`, `refunded`,
-        `cancelled`, `expired`, or `failed`.
-      parameters:
-        - { $ref: '#/components/parameters/OnBehalfOf' }
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data: { $ref: '#/components/schemas/CancelDepositResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /user/wallet/deposit/{id}/resume:
-    post:
-      operationId: resumeDeposit
-      tags: [Deposits]
-      summary: Resume deposit
-      description: |
-        **Auth context:** sub-user — `On-Behalf-Of` required.
-
-        Returns the current `whitelabelUrl` / on-chain address for an existing
-        deposit so a user can finish paying after closing the original session.
-      parameters:
-        - { $ref: '#/components/parameters/OnBehalfOf' }
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data: { $ref: '#/components/schemas/ResumeDepositResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
 
   # ─────────────────────────────────────────────────────────────────────
   # CATALOG
@@ -3935,8 +3478,7 @@ paths:
         Common error keys: `STEAM_ACCOUNT_REQUIRED` (1417), `USER_NOT_TRADEABLE` (2101),
         `INVENTORY_PRIVATE` (2102), `ESCROW_NOT_ALLOWED` (2105), `NO_OFFER_FOUND` (2107),
         `ITEMS_NOT_ACCEPTED` (2108), `PRICE_MISMATCH` (2020), `DUPLICATE_LISTING_ID` (2023),
-        `NO_BOTS_AVAILABLE` (2100), `SELL_CAPACITY_EXHAUSTED` (2115), `PRICING_UNAVAILABLE` (2109),
-        `TRADE_LIMIT_EXCEEDED`.
+        `NO_BOTS_AVAILABLE` (2100), `SELL_CAPACITY_EXHAUSTED` (2115), `PRICING_UNAVAILABLE` (2109).
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
       requestBody:
@@ -4178,9 +3720,7 @@ paths:
         ### Events
 
         Each frame has the shape `{ event, data, ts }` where `ts` is Unix epoch
-        ms. See the `WsEvent` schema below for the full union — the deposit
-        events differ between gateway-hosted (gatepay/onramp) and self-hosted
-        crypto deposits even though they share `event` names.
+        ms. See the `WsEvent` schema below for the full union.
       parameters:
         - name: token
           in: query
@@ -4214,11 +3754,9 @@ paths:
         Discriminate on `event`:
 
         - `connected` → WsConnectedEvent
-        - `deposit.transfer` → WsDepositTransferEvent (gatepay on-chain detected)
-        - `deposit.completed` → WsGatewayDepositCompletedEvent **or** WsCryptoDepositCreditedEvent (distinguish by `data.fundingId` vs `data.depositId`)
-        - `deposit.failed` → WsDepositFailedEvent **or** WsCryptoDepositFailedEvent (distinguish by `data.fundingId` vs `data.depositId`)
-        - `deposit.refunded` → WsDepositRefundedEvent
         - `deposit.pending` → WsCryptoDepositPendingEvent
+        - `deposit.completed` → WsCryptoDepositCreditedEvent
+        - `deposit.failed` → WsCryptoDepositFailedEvent
         - `trade.<status>` → WsTradeUpdateEvent
         - `system.notice` → WsSystemNoticeEvent
       responses:

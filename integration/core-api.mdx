@@ -49,7 +49,7 @@ run as the merchant. So you only ever need:
 | Cancel one undelivered item | `POST /market/transactions/{tradeId}/items/{itemId}/cancel` |
 | Cancel a whole trade | `POST /market/transactions/{tradeId}/cancel` |
 | Stats (GMV, fees) | `GET /merchant/stats` |
-| Deposit (Gate Pay / on-ramp / crypto) | `POST /user/wallet/deposit/...` |
+| Crypto deposit address | `GET /user/wallet/deposit/crypto/address` |
 
 ## Skip these (for now)
 
@@ -84,8 +84,8 @@ A typical day in Core API:
     against yesterday's window for accounting.
   </Step>
   <Step title="Top up">
-    When the merchant balance dips, deposit via Gate Pay / on-ramp /
-    crypto. The deposit credits the merchant wallet directly.
+    When the merchant balance dips, deposit crypto to the merchant's deposit
+    address. The deposit credits the merchant wallet directly.
   </Step>
 </Steps>
 

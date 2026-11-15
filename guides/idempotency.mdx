@@ -165,33 +165,7 @@ Some endpoints don't have idempotency support — duplicates from network
 failures need different handling:
 
 - **Catalog reads** (search, listings, item detail) — GETs, free to retry.
-- **Deposit `quote` endpoints** — quotes are short-lived (TTL embedded in
-  `expiresIn`); if you retry within the TTL you'll get a different quote.
-  Don't retry on network failure; create a fresh quote.
-- **Deposit `create` / `session` endpoints** — retrying after a network
-  failure can produce two pending deposits. Pattern: walk recent deposits
-  for the sub-user and **resume** the existing one rather than creating
-  fresh:
-
-```ts
-// Resume an in-progress deposit instead of creating a new one
-await sdk.deposits.resume(fundingId);
-// Returns the current whitelabelUrl / on-chain address.
-```
-
-If your quote expires mid-flow:
-
-```ts
-try {
-  return await sdk.deposits.gate.create({ quoteToken, chain }, { onBehalfOf: subUserId });
-} catch (err) {
-  if (isError(err, "INVALID_QUOTE")) {
-    const quote = await sdk.deposits.gate.quote(requote, { onBehalfOf: subUserId });
-    return sdk.deposits.gate.create({ quoteToken: quote.quoteToken, chain }, { onBehalfOf: subUserId });
-  }
-  throw err;
-}
-```
+- **Crypto deposit quotes** — a preview only, nothing is created. Retry freely.
 
 ## When to retry vs reconcile
 

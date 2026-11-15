@@ -83,33 +83,15 @@ type WsEvent =
   | { event: "system.notice"; data: { severity: "info" | "warning" | "critical"; message: string }; ts: number };
 
 type DepositEvent =
-  | { event: "deposit.transfer"; data: { fundingId: string; status: "pending"; transfer: { txHash: string; amount: number; chain: string } }; ts: number }
-  | { event: "deposit.completed"; data: { fundingId?: string; depositId?: string; status: "completed"; payAmountToken?: number; receiveAmountUsd?: number; completedAt: string }; ts: number }
-  | { event: "deposit.failed"; data: { fundingId?: string; depositId?: string; status: string; reason: string }; ts: number }
-  | { event: "deposit.refunded"; data: { fundingId: string; status: "refunded" }; ts: number }
-  | { event: "deposit.pending"; data: { depositId: string; chain: string; token: string; txHash: string; amountWei: string }; ts: number };
+  | { event: "deposit.pending"; data: { depositId: string; chain: string; token: string; txHash: string; amountWei: string }; ts: number }
+  | { event: "deposit.completed"; data: { depositId: string; chain: string; token: string; txHash: string; amountWei: string; amountUsdCents: string; confirmations: number; completedAt: string }; ts: number }
+  | { event: "deposit.failed"; data: { depositId: string; chain: string; token: string; txHash: string; reason: string; confirmations: number }; ts: number };
 
 type TradeEvent = {
   event: `trade.${string}`;       // "trade.completed", "trade.failed", "trade.pending", etc.
   data: Trade;
   ts: number;
 };
-```
-
-### Discriminating deposits
-
-Gateway-hosted deposits (Gate Pay, on-ramp) and self-hosted crypto
-share event names but carry different keys:
-
-| Event | Gateway | Self-hosted crypto |
-|---|---|---|
-| `deposit.completed` | has `fundingId`, `payAmountToken`, `receiveAmountUsd` | has `depositId`, `chain`, `token`, `txHash`, `amountWei`, `amountUsdCents`, `confirmations` |
-| `deposit.failed` | has `fundingId`, `status`, `reason` | has `depositId`, `chain`, `token`, `txHash`, `reason`, `confirmations` |
-
-```ts
-function isCryptoDeposit(e: { fundingId?: string; depositId?: string }): boolean {
-  return Boolean(e.depositId);
-}
 ```
 
 ### Trade events

@@ -29,7 +29,7 @@ Codes are organized into 100-block ranges by domain, with sub-groups every
 | 1300–1399 | Account access |
 | 1400–1499 | User Settings |
 | 1500–1599 | Wallet |
-| 1600–1699 | Deposits (gateway: gatepay, onramp) |
+| 1600–1699 | Deposits |
 | 1700–1799 | Withdrawals (reserved) |
 | 1800–1899 | Crypto Deposits / Withdrawals |
 | 1900–1999 | Merchant Management |
@@ -148,21 +148,11 @@ Cross-cutting errors that any endpoint can return.
 | 1511 | `IDEMPOTENCY_KEY_REQUIRED` | 422 | `Idempotency-Key` header missing on `/fund`. |
 | 1522 | `FX_RATE_UNAVAILABLE` | 503 | FX rate unavailable — retry shortly. |
 
-## Deposits — gateway (1600–1608)
-
-`gatepay` and `onramp` deposits.
+## Deposits (1600)
 
 | Code | Key | HTTP | Meaning |
 |---|---|---|---|
 | 1600 | `DEPOSIT_NOT_FOUND` | 404 | Unknown deposit ID. |
-| 1601 | `DEPOSIT_NOT_CANCELLABLE` | 422 | Only `initiated` deposits can be cancelled. |
-| 1602 | `DEPOSIT_NOT_RESUMABLE` | 422 | Deposit reached a terminal state. |
-| 1603 | `INVALID_QUOTE` | 422 | Quote token bad or expired. Re-quote. |
-| 1604 | `INVALID_CHAIN` | 422 | Unsupported chain for this currency. |
-| 1605 | `INVALID_DEPOSIT_CURRENCY` | 422 | Unsupported deposit currency. |
-| 1606 | `DEPOSIT_MIN_AMOUNT` | 422 | Below provider minimum. |
-| 1607 | `INVALID_SIGNATURE` | 401 | Gateway callback signature failed. |
-| 1608 | `GATEWAY_ERROR` | 502 | Payment gateway returned an error. |
 
 ## Crypto deposits / withdrawals (1800–1811, 1829)
 

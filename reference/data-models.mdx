@@ -61,12 +61,6 @@ type DepositStatus =
   | "refunded"
   | "failed";
 
-type DepositMethod = "gatepay" | "onramp" | "crypto";
-
-type DepositCurrency = "USDT" | "USDC" | "DAI" | "BTC" | "ETH" | "SOL";
-
-type OnrampPayCurrency = "USD" | "EUR" | "GBP";
-
 type CryptoEvmChain = "ethereum" | "base" | "arbitrum" | "optimism" | "bsc";
 
 type CryptoChain = CryptoEvmChain | "tron" | "solana";
@@ -560,71 +554,6 @@ type ListingDetail = MarketListing;
 ## Deposits
 
 ```ts
-// Gate Pay
-interface DepositChainsResponse {
-  currencies: Array<{
-    currency: DepositCurrency;
-    chains: string[];
-    isStable: boolean;
-    minDepositUsd: number;
-  }>;
-}
-
-interface DepositQuoteBody {
-  currency: DepositCurrency;
-  amount: string;              // decimal USD
-}
-
-interface DepositQuoteResponse {
-  token: DepositCurrency;
-  currency: Currency;
-  payAmountToken: number;
-  receiveAmountUsd: number;
-  receiveAmount: number;
-  fee: number;
-  exchangeRate: number;
-  quoteToken: string;
-  expiresIn: string;           // "5m"
-}
-
-interface CreateDepositBody {
-  quoteToken: string;
-  chain: string;
-}
-
-interface CreateDepositResponse {
-  fundingId: string;
-  status: DepositStatus;
-  currency: Currency;
-  payAmountToken: number;
-  receiveAmountUsd: number;
-  receiveAmount: number;
-  exchangeRate: number;
-  fee: number;
-  expireTime: number | null;
-  whitelabelUrl: string | null;
-  onChain: { network: string; token: DepositCurrency; address: string };
-}
-
-// On-ramp (card)
-interface OnrampQuoteBody {
-  payAmount?: number;
-  receiveAmount?: number;
-  payCurrency: OnrampPayCurrency;
-}
-
-interface OnrampSessionResponse {
-  fundingId: string;
-  status: "initiated" | "completed" | "failed";
-  currency: Currency;
-  payAmount: number;
-  receiveAmount: number;
-  receiveAmountUsd: number;
-  payCurrency: OnrampPayCurrency;
-  exchangeRate: number;
-  whitelabelUrl: string;
-}
-
 // Self-hosted crypto: EVM, Tron, Solana
 // One deposit address per chain family. `address` is what the sender pays to.
 interface CryptoAddressEntry {
@@ -663,20 +592,6 @@ interface CryptoQuoteResponse {
   }>>;
 }
 
-interface CancelDepositResponse {
-  depositId: string;
-  status: DepositStatus;
-}
-
-interface ResumeDepositResponse {
-  fundingId: string;
-  status: DepositStatus;
-  method: DepositMethod;
-  currency: Currency;
-  amount: number;
-  whitelabelUrl: string | null;
-  onChain: { network: string; token: string; address: string } | null;
-}
 ```
 
 ## Partner crypto payout custody
