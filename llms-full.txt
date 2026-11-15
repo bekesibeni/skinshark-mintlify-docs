@@ -22,8 +22,8 @@ dashboard runs on.
   </Card>
   <Card title="Fund wallets" href="/integration/full-platform">
     Move balance from your merchant account to any sub-user with idempotent
-    transfers, or accept deposits via Gate Pay, on-ramp cards, or self-hosted
-    crypto on EVM chains, Tron and Solana.
+    transfers, or accept self-hosted crypto deposits on EVM chains, Tron and
+    Solana.
   </Card>
   <Card title="Buy items" href="/api-reference/buymarketitems">
     Buy specific listings or hand the server a target item and let it pick
@@ -947,8 +947,6 @@ Endpoints that accept money take **decimal strings**:
 | `POST /merchant/users/{id}/fund` | `amount` | `"25.00"` |
 | `POST /market/buy` (`items[].maxPrice`) | `maxPrice` | `"1.50"` |
 | `POST /market/buy/quick` | `maxPrice` | `"1.50"` |
-| `POST /user/wallet/deposit/gate/quote` | `amount` | `"100.00"` |
-| `POST /user/wallet/deposit/onramp/quote` | `payAmount` / `receiveAmount` | `100.00` (number, fine for on-ramp) |
 | `POST /user/wallet/deposit/crypto/quote` | `amount` | `100.00` (number, ≤ $10M) |
 
 The decimal-string format (`"25.00"`) avoids floating-point loss on the
@@ -993,7 +991,6 @@ after padding.
 ## Currency
 
 Every wallet, merchant and sub-user alike, holds USD, and every `currency` field reads `USD`.
-Card deposits through Onramp can still be paid in EUR or GBP; they credit the wallet in USD.
 
 
 # Pagination
@@ -1283,33 +1280,7 @@ Some endpoints don't have idempotency support — duplicates from network
 failures need different handling:
 
 - **Catalog reads** (search, listings, item detail) — GETs, free to retry.
-- **Deposit `quote` endpoints** — quotes are short-lived (TTL embedded in
-  `expiresIn`); if you retry within the TTL you'll get a different quote.
-  Don't retry on network failure; create a fresh quote.
-- **Deposit `create` / `session` endpoints** — retrying after a network
-  failure can produce two pending deposits. Pattern: walk recent deposits
-  for the sub-user and **resume** the existing one rather than creating
-  fresh:
-
-```ts
-// Resume an in-progress deposit instead of creating a new one
-await sdk.deposits.resume(fundingId);
-// Returns the current whitelabelUrl / on-chain address.
-```
-
-If your quote expires mid-flow:
-
-```ts
-try {
-  return await sdk.deposits.gate.create({ quoteToken, chain }, { onBehalfOf: subUserId });
-} catch (err) {
-  if (isError(err, "INVALID_QUOTE")) {
-    const quote = await sdk.deposits.gate.quote(requote, { onBehalfOf: subUserId });
-    return sdk.deposits.gate.create({ quoteToken: quote.quoteToken, chain }, { onBehalfOf: subUserId });
-  }
-  throw err;
-}
-```
+- **Crypto deposit quotes** — a preview only, nothing is created. Retry freely.
 
 ## When to retry vs reconcile
 
@@ -1664,7 +1635,7 @@ run as the merchant. So you only ever need:
 | Cancel one undelivered item | `POST /market/transactions/{tradeId}/items/{itemId}/cancel` |
 | Cancel a whole trade | `POST /market/transactions/{tradeId}/cancel` |
 | Stats (GMV, fees) | `GET /merchant/stats` |
-| Deposit (Gate Pay / on-ramp / crypto) | `POST /user/wallet/deposit/...` |
+| Crypto deposit address | `GET /user/wallet/deposit/crypto/address` |
 
 ## Skip these (for now)
 
@@ -1699,8 +1670,8 @@ A typical day in Core API:
     against yesterday's window for accounting.
   </Step>
   <Step title="Top up">
-    When the merchant balance dips, deposit via Gate Pay / on-ramp /
-    crypto. The deposit credits the merchant wallet directly.
+    When the merchant balance dips, deposit crypto to the merchant's deposit
+    address. The deposit credits the merchant wallet directly.
   </Step>
 </Steps>
 
@@ -1890,7 +1861,7 @@ async function fundOnCheckout(internalUserId: string, amount: string, checkoutId
 
 ### (b) Direct deposit from the customer
 
-The customer pays SkinShark directly via Gate Pay / on-ramp / crypto. Run
+The customer pays SkinShark directly in crypto. Run
 under `On-Behalf-Of` so the deposit credits the sub-user.
 
 ```ts
@@ -3089,33 +3060,15 @@ type WsEvent =
   | { event: "system.notice"; data: { severity: "info" | "warning" | "critical"; message: string }; ts: number };
 
 type DepositEvent =
-  | { event: "deposit.transfer"; data: { fundingId: string; status: "pending"; transfer: { txHash: string; amount: number; chain: string } }; ts: number }
-  | { event: "deposit.completed"; data: { fundingId?: string; depositId?: string; status: "completed"; payAmountToken?: number; receiveAmountUsd?: number; completedAt: string }; ts: number }
-  | { event: "deposit.failed"; data: { fundingId?: string; depositId?: string; status: string; reason: string }; ts: number }
-  | { event: "deposit.refunded"; data: { fundingId: string; status: "refunded" }; ts: number }
-  | { event: "deposit.pending"; data: { depositId: string; chain: string; token: string; txHash: string; amountWei: string }; ts: number };
+  | { event: "deposit.pending"; data: { depositId: string; chain: string; token: string; txHash: string; amountWei: string }; ts: number }
+  | { event: "deposit.completed"; data: { depositId: string; chain: string; token: string; txHash: string; amountWei: string; amountUsdCents: string; confirmations: number; completedAt: string }; ts: number }
+  | { event: "deposit.failed"; data: { depositId: string; chain: string; token: string; txHash: string; reason: string; confirmations: number }; ts: number };
 
 type TradeEvent = {
   event: `trade.${string}`;       // "trade.completed", "trade.failed", "trade.pending", etc.
   data: Trade;
   ts: number;
 };
-```
-
-### Discriminating deposits
-
-Gateway-hosted deposits (Gate Pay, on-ramp) and self-hosted crypto
-share event names but carry different keys:
-
-| Event | Gateway | Self-hosted crypto |
-|---|---|---|
-| `deposit.completed` | has `fundingId`, `payAmountToken`, `receiveAmountUsd` | has `depositId`, `chain`, `token`, `txHash`, `amountWei`, `amountUsdCents`, `confirmations` |
-| `deposit.failed` | has `fundingId`, `status`, `reason` | has `depositId`, `chain`, `token`, `txHash`, `reason`, `confirmations` |
-
-```ts
-function isCryptoDeposit(e: { fundingId?: string; depositId?: string }): boolean {
-  return Boolean(e.depositId);
-}
 ```
 
 ### Trade events
@@ -3812,12 +3765,6 @@ type DepositStatus =
   | "refunded"
   | "failed";
 
-type DepositMethod = "gatepay" | "onramp" | "crypto";
-
-type DepositCurrency = "USDT" | "USDC" | "DAI" | "BTC" | "ETH" | "SOL";
-
-type OnrampPayCurrency = "USD" | "EUR" | "GBP";
-
 type CryptoEvmChain = "ethereum" | "base" | "arbitrum" | "optimism" | "bsc";
 
 type CryptoChain = CryptoEvmChain | "tron" | "solana";
@@ -4311,71 +4258,6 @@ type ListingDetail = MarketListing;
 ## Deposits
 
 ```ts
-// Gate Pay
-interface DepositChainsResponse {
-  currencies: Array<{
-    currency: DepositCurrency;
-    chains: string[];
-    isStable: boolean;
-    minDepositUsd: number;
-  }>;
-}
-
-interface DepositQuoteBody {
-  currency: DepositCurrency;
-  amount: string;              // decimal USD
-}
-
-interface DepositQuoteResponse {
-  token: DepositCurrency;
-  currency: Currency;
-  payAmountToken: number;
-  receiveAmountUsd: number;
-  receiveAmount: number;
-  fee: number;
-  exchangeRate: number;
-  quoteToken: string;
-  expiresIn: string;           // "5m"
-}
-
-interface CreateDepositBody {
-  quoteToken: string;
-  chain: string;
-}
-
-interface CreateDepositResponse {
-  fundingId: string;
-  status: DepositStatus;
-  currency: Currency;
-  payAmountToken: number;
-  receiveAmountUsd: number;
-  receiveAmount: number;
-  exchangeRate: number;
-  fee: number;
-  expireTime: number | null;
-  whitelabelUrl: string | null;
-  onChain: { network: string; token: DepositCurrency; address: string };
-}
-
-// On-ramp (card)
-interface OnrampQuoteBody {
-  payAmount?: number;
-  receiveAmount?: number;
-  payCurrency: OnrampPayCurrency;
-}
-
-interface OnrampSessionResponse {
-  fundingId: string;
-  status: "initiated" | "completed" | "failed";
-  currency: Currency;
-  payAmount: number;
-  receiveAmount: number;
-  receiveAmountUsd: number;
-  payCurrency: OnrampPayCurrency;
-  exchangeRate: number;
-  whitelabelUrl: string;
-}
-
 // Self-hosted crypto: EVM, Tron, Solana
 // One deposit address per chain family. `address` is what the sender pays to.
 interface CryptoAddressEntry {
@@ -4414,20 +4296,6 @@ interface CryptoQuoteResponse {
   }>>;
 }
 
-interface CancelDepositResponse {
-  depositId: string;
-  status: DepositStatus;
-}
-
-interface ResumeDepositResponse {
-  fundingId: string;
-  status: DepositStatus;
-  method: DepositMethod;
-  currency: Currency;
-  amount: number;
-  whitelabelUrl: string | null;
-  onChain: { network: string; token: string; address: string } | null;
-}
 ```
 
 ## Partner crypto payout custody
@@ -4644,7 +4512,7 @@ Codes are organized into 100-block ranges by domain, with sub-groups every
 | 1300–1399 | Account access |
 | 1400–1499 | User Settings |
 | 1500–1599 | Wallet |
-| 1600–1699 | Deposits (gateway: gatepay, onramp) |
+| 1600–1699 | Deposits |
 | 1700–1799 | Withdrawals (reserved) |
 | 1800–1899 | Crypto Deposits / Withdrawals |
 | 1900–1999 | Merchant Management |
@@ -4763,21 +4631,11 @@ Cross-cutting errors that any endpoint can return.
 | 1511 | `IDEMPOTENCY_KEY_REQUIRED` | 422 | `Idempotency-Key` header missing on `/fund`. |
 | 1522 | `FX_RATE_UNAVAILABLE` | 503 | FX rate unavailable — retry shortly. |
 
-## Deposits — gateway (1600–1608)
-
-`gatepay` and `onramp` deposits.
+## Deposits (1600)
 
 | Code | Key | HTTP | Meaning |
 |---|---|---|---|
 | 1600 | `DEPOSIT_NOT_FOUND` | 404 | Unknown deposit ID. |
-| 1601 | `DEPOSIT_NOT_CANCELLABLE` | 422 | Only `initiated` deposits can be cancelled. |
-| 1602 | `DEPOSIT_NOT_RESUMABLE` | 422 | Deposit reached a terminal state. |
-| 1603 | `INVALID_QUOTE` | 422 | Quote token bad or expired. Re-quote. |
-| 1604 | `INVALID_CHAIN` | 422 | Unsupported chain for this currency. |
-| 1605 | `INVALID_DEPOSIT_CURRENCY` | 422 | Unsupported deposit currency. |
-| 1606 | `DEPOSIT_MIN_AMOUNT` | 422 | Below provider minimum. |
-| 1607 | `INVALID_SIGNATURE` | 401 | Gateway callback signature failed. |
-| 1608 | `GATEWAY_ERROR` | 502 | Payment gateway returned an error. |
 
 ## Crypto deposits / withdrawals (1800–1811, 1829)
 
@@ -4995,7 +4853,7 @@ OAuth start. Tighter per-IP caps to slow brute-force.
 
 ### Webhooks (per-IP)
 
-Inbound provider webhooks (gatepay, onramp, crypto, marketplace
+Inbound provider webhooks (crypto and marketplace
 callbacks): 60/min per source IP.
 
 ## Response headers
@@ -5284,48 +5142,6 @@ can be primary.
 
 **Auth context:** sub-user — `On-Behalf-Of` required.
 
-### GET /user/wallet/deposit/gate/chains
-
-**List Gate Pay chains**
-
-**Auth context:** sub-user — `On-Behalf-Of` required.
-
-### POST /user/wallet/deposit/gate/quote
-
-**Quote Gate Pay deposit**
-
-**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
-
-Quote is short-lived (TTL embedded in `expiresIn`). Pass `quoteToken` to
-the create endpoint to commit.
-
-### POST /user/wallet/deposit/gate
-
-**Create Gate Pay deposit**
-
-**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
-
-Returns either a hosted `whitelabelUrl` (redirect the sub-user there) or
-an on-chain pay-to address — usually both. Settlement happens via the
-gateway webhook; subscribe to `deposit.transfer` / `deposit.completed`
-WS events for the sub-user.
-
-### POST /user/wallet/deposit/onramp/quote
-
-**Quote card deposit**
-
-**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
-
-### POST /user/wallet/deposit/onramp/session
-
-**Create card deposit session**
-
-**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
-
-Returns a `whitelabelUrl` to redirect the sub-user to. After payment,
-the on-ramp partner posts a callback and the sub-user's wallet is
-credited; subscribe to `deposit.completed` WS events to react.
-
 ### GET /user/wallet/deposit/crypto/address
 
 **Get crypto deposit address**
@@ -5456,33 +5272,14 @@ Flow:
 Cursor-paginated, most-recent first. Filter by status, chain, or `forUserId`
 (the sub-user UUID stamped at create time, not the partner externalId).
 
+## Catalog
+
 ### GET /user/wallet/payout/crypto/withdrawals/{id}
 
 **Get payout withdrawal**
 
 **Auth context:** merchant. Returns full detail including current status, on-chain
 txHash (once `broadcast`), failure reason, and callback retry count.
-
-### POST /user/wallet/deposit/{id}/cancel
-
-**Cancel deposit**
-
-**Auth context:** sub-user — `On-Behalf-Of` required.
-
-Works for `gatepay` and `onramp` deposits in non-final state (`initiated`,
-`pending`, `partial`). No-op once the deposit is `completed`, `refunded`,
-`cancelled`, `expired`, or `failed`.
-
-## Catalog
-
-### POST /user/wallet/deposit/{id}/resume
-
-**Resume deposit**
-
-**Auth context:** sub-user — `On-Behalf-Of` required.
-
-Returns the current `whitelabelUrl` / on-chain address for an existing
-deposit so a user can finish paying after closing the original session.
 
 ### GET /market/search/suggestions
 
@@ -5715,8 +5512,7 @@ saved trade URL. Subscribe to `trade.*` WS events for status updates.
 Common error keys: `STEAM_ACCOUNT_REQUIRED` (1417), `USER_NOT_TRADEABLE` (2101),
 `INVENTORY_PRIVATE` (2102), `ESCROW_NOT_ALLOWED` (2105), `NO_OFFER_FOUND` (2107),
 `ITEMS_NOT_ACCEPTED` (2108), `PRICE_MISMATCH` (2020), `DUPLICATE_LISTING_ID` (2023),
-`NO_BOTS_AVAILABLE` (2100), `SELL_CAPACITY_EXHAUSTED` (2115), `PRICING_UNAVAILABLE` (2109),
-`TRADE_LIMIT_EXCEEDED`.
+`NO_BOTS_AVAILABLE` (2100), `SELL_CAPACITY_EXHAUSTED` (2115), `PRICING_UNAVAILABLE` (2109).
 
 ### GET /market/transactions
 
@@ -5820,9 +5616,7 @@ Invalid token`.
 ### Events
 
 Each frame has the shape `{ event, data, ts }` where `ts` is Unix epoch
-ms. See the `WsEvent` schema below for the full union — the deposit
-events differ between gateway-hosted (gatepay/onramp) and self-hosted
-crypto deposits even though they share `event` names.
+ms. See the `WsEvent` schema below for the full union.
 
 ### GET /ws/events
 
@@ -5835,11 +5629,9 @@ This is a documentation-only path — there is no HTTP endpoint at
 Discriminate on `event`:
 
 - `connected` → WsConnectedEvent
-- `deposit.transfer` → WsDepositTransferEvent (gatepay on-chain detected)
-- `deposit.completed` → WsGatewayDepositCompletedEvent **or** WsCryptoDepositCreditedEvent (distinguish by `data.fundingId` vs `data.depositId`)
-- `deposit.failed` → WsDepositFailedEvent **or** WsCryptoDepositFailedEvent (distinguish by `data.fundingId` vs `data.depositId`)
-- `deposit.refunded` → WsDepositRefundedEvent
 - `deposit.pending` → WsCryptoDepositPendingEvent
+- `deposit.completed` → WsCryptoDepositCreditedEvent
+- `deposit.failed` → WsCryptoDepositFailedEvent
 - `trade.<status>` → WsTradeUpdateEvent
 - `system.notice` → WsSystemNoticeEvent
 
