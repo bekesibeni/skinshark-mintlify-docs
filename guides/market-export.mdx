@@ -58,7 +58,6 @@ const build = await api<BookExport>("/market/export", { method: "GET" });
   "seq": 18342,
   "builtAt": "2026-10-29T14:05:00.000Z",
   "listings": 2481337,
-  "feeBps": 250,
   "level": "full",
   "files": [
     { "url": "https://…", "rows": 155083, "bytes": 9718231, "sha256": "3f1c9b0e…" }
@@ -176,11 +175,11 @@ Refusals happen before the upgrade, as an HTTP status with the standard
 On connect the server sends:
 
 ```json
-{ "type": "hello", "epoch": "1761746400000", "seq": 18342, "level": "extended", "feeBps": 250, "firehose": false, "itemCap": 5000 }
+{ "type": "hello", "epoch": "1761746400000", "seq": 18342, "level": "extended", "firehose": false, "itemCap": 5000 }
 ```
 
-`epoch` and `seq` are the stream's current position; `level`, `feeBps`,
-`firehose` and `itemCap` are your entitlement and price tier.
+`epoch` and `seq` are the stream's current position; `level`, `firehose` and
+`itemCap` are your entitlement.
 
 ### Subscribe
 

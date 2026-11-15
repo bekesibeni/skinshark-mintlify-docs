@@ -118,10 +118,8 @@ interface MerchantProfile {
   roles: Role[];
   twoFactorEnabled: boolean;
   twoFactorMethod: TwoFactorMethod | null;
-  feeBps: number;             // house fee on merchant's own buys
   buyFeeBps: number;          // merchant's cut on sub-user buys
   sellFeeBps: number;         // merchant's cut on sub-user sells, off the payout
-  childDefaultFeeBps: number | null;
   wallets: {
     spot: { currency: string; balance: number } | null;
     earnings: { currency: string; balance: number } | null;
@@ -129,12 +127,9 @@ interface MerchantProfile {
   createdAt: string;
 }
 
-interface FeesResponse {
+interface FeesResponse {   // your own cuts, paid into your earnings wallet
   buyFeeBps: number;
   sellFeeBps: number;
-  childDefaultFeeBps: number | null;
-  globalDefaultFeeBps: number;
-  effectiveChildFeeBps: number;
 }
 
 interface MerchantStats {
@@ -178,7 +173,6 @@ interface SubUserListItem {
   steamId: string | null;
   externalId: string | null;
   status: UserStatus;
-  feeBps: number | null;
   currency: Currency | null;
   balance: number;
   createdAt: string;
@@ -205,7 +199,6 @@ interface CreateSubUserResponse {
   steamId: string | null;
   externalId: string | null;
   status: UserStatus;
-  feeBps: number | null;
   createdAt: string;
   currency: Currency;
   /** True when the response replays a prior create with the same externalId. */
@@ -218,7 +211,6 @@ interface SubUserResponse {
   steamId: string | null;
   externalId: string | null;
   status: UserStatus;
-  feeBps: number | null;
   createdAt: string;
   wallet: {                    // single object — sub-users only have one wallet
     type: WalletType;
@@ -634,7 +626,7 @@ interface PayoutQuoteBody {
   amountCents: string;              // bigint as decimal string
 }
 
-// All fees pre-multiplied by the configured payout fee multiplier (default 1.5).
+// Fees in USD cents, as a payout would be charged.
 // L2 chains (Base, Arbitrum, Optimism) and Solana return all-"0" stats; Tron its flat fee.
 interface PayoutQuoteStats24h {
   minFeeUsdCents: string;
