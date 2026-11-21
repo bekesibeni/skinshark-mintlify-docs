@@ -1179,6 +1179,29 @@ components:
           description: Hex SHA-256 of the downloaded (gzipped) bytes.
           example: 3f1c9b0e5a7d2c8e4b6f0a1d9e3c7b5a2f8d6e4c0b9a7f5e3d1c8b6a4f2e0d9c
 
+    PoolAccessResponse:
+      type: object
+      required: [url, host, port, tls, username, password, level, depth, instantMin, keys]
+      properties:
+        url: { type: string, description: 'Connection URL with the login in it: `rediss://user:password@host:port`.' }
+        host: { type: string }
+        port: { type: integer }
+        tls: { type: boolean }
+        username: { type: string }
+        password: { type: string }
+        level: { type: string, enum: [minimal, extended, full] }
+        depth: { type: integer, description: Most listings held per item and phase. }
+        instantMin: { type: integer, description: Instant listings held per item and phase when it has that many. }
+        keys:
+          type: object
+          required: [items, rows, prices, stream, state, meta]
+          properties:
+            items: { type: string, description: 'Hash: item key → item JSON.' }
+            rows: { type: string, description: 'Prefix; + item key is a hash: listing id → listing JSON at your level.' }
+            prices: { type: string, description: 'Prefix; + item key is a hash: listing id → your price (USD decimal string).' }
+            stream: { type: string, description: 'Stream of `item.add`, `price.update`, `item.remove`, data `{ id, itemKey }`.' }
+            state: { type: string, description: 'Hash: `t`, `frozen`, `depth`, `instantMin`, `gen`.' }
+            meta: { type: string, description: 'Hash: `ready` is `1` once your prices are complete.' }
     BookExportResponse:
       type: object
       required: [epoch, seq, builtAt, listings, level, files, expiresAt, stream]
@@ -3212,15 +3235,17 @@ paths:
         market-data entitlement, enabled per merchant by SkinShark.
 
         Returns signed links to the latest build of the market export: the
-        full-depth, deduplicated book of every buyable listing, one listing per
-        physical item, priced for your account (prices already include your
-        fee). Each listing `id` can be passed straight to `/market/buy`.
+        pool of the deduplicated book, the 100 cheapest buyable listings of
+        every item and Doppler phase (at least 30 of them instant when the
+        item has that many), one listing per physical item, priced for your
+        account (prices already include your fee). Each listing `id` can be
+        passed straight to `/market/buy`.
 
         A build is 16 gzipped NDJSON `files`, split by item, with a whole listing
         on every line. Download them in parallel, check each file's `sha256`
         (hex of the gzipped bytes) and `rows`, then gunzip. The links expire at
         `expiresAt`, about 10 minutes after the call. A new build lands about
-        every 20 minutes.
+        every 10 minutes.
 
         - Each line is a listing as a JSON object: `id`, `itemId`, `name`,
           `phase`, `price` (a decimal string in USD, `"12.34"`) and `instant`
@@ -3229,7 +3254,7 @@ paths:
           `paintIndex`, `stickers`. `full` adds `assetId`, `inspect`,
           `revertRefundPercent`.
 
-        The build is the whole book as of (`epoch`, `seq`). Keep it current by
+        The build is the whole pool as of (`epoch`, `seq`). Keep it current by
         subscribing to `wss://stream.skinshark.gg/market/stream` with
         `epoch` and `since: seq`.
 
@@ -3273,6 +3298,50 @@ paths:
           description: |
             `EXPORT_NOT_READY` (2006) — the build for your price tier is not
             there yet (for example, for a minute after a new epoch). Retry shortly.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /market/pool:
+    get:
+      operationId: getPoolAccess
+      tags: [Market]
+      summary: Market pool Redis login
+      description: |
+        **Auth context:** merchant only. `On-Behalf-Of` rejected. Requires the
+        market-data entitlement, enabled per merchant by SkinShark.
+
+        Returns a read-only login to the pool Redis: the same 100 cheapest
+        listings per item and phase as the export, priced for your account.
+        Connect with `url` as is (TLS when `tls`, with no `INFO`-based ready
+        check). The login reads only the keys in `keys`; anything else answers
+        `NOPERM`. The URL is the same on every call until you rotate the
+        password from the dashboard. Call again after `NOPERM`: a fee or level
+        change moves your prices to another key prefix.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PoolAccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            `MARKET_DATA_NOT_ENABLED` (2005) — market data, or Redis access, is
+            not enabled for this account. `FORBIDDEN` — the caller is not a
+            merchant, or `On-Behalf-Of` was set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503':
+          description: |
+            `POOL_NOT_READY` (2008) — Redis access is not available yet. Retry later.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
