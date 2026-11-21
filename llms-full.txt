@@ -3341,25 +3341,32 @@ the [WebSocket](/guides/websocket#reconnection) guide.
 # Market export & stream
 Source: https://skinshark.gg/docs/guides/market-export
 
-Every SkinShark listing as a downloadable build, kept current by a sequenced WebSocket of one-second change frames.
+The cheapest 100 listings of every item as a downloadable build, kept current by a sequenced WebSocket of one-second change frames, or read live from Redis.
 
 
-The market export is the full-depth, deduplicated SkinShark market: every
-buyable listing, one listing per physical item, priced for your account.
-Prices already include your fee, so you serve them as-is, and every listing
-`id` can be passed straight to `POST /market/buy`.
+The market export is the pool of the deduplicated SkinShark market: for every
+item (and every Doppler phase), its 100 cheapest buyable listings, at least 30
+of them instant when the item has that many, one listing per physical item,
+priced for your account. Prices already include your fee, so you serve them
+as-is, and every listing `id` can be passed straight to `POST /market/buy`.
 
-It has two surfaces that share one position, `(epoch, seq)`:
+It has three surfaces carrying the same pool:
 
-- `GET /market/export` — signed links to the latest build: the whole
-  book as of one `(epoch, seq)`.
+- `GET /market/export` — signed links to the latest build: the pool as of
+  one `(epoch, seq)`.
 - `wss://stream.skinshark.gg/market/stream` — the changes after that
   position, one frame per second.
+- [Redis](#redis) — the pool as hashes you read directly, with a stream
+  that names every listing that changed.
 
-Load a build, then subscribe from its `seq` and apply frames on top. Unlike
-the [live market](/guides/live-market), which serves the cheapest listings
-per item to end users, the market export carries every listing and is meant
-for a backend that keeps its own copy.
+Load a build, then subscribe from its `seq` and apply frames on top, or read
+the pool from Redis. Unlike the [live market](/guides/live-market), which
+serves the cheapest few listings per item to end users, the market export is
+meant for a backend that keeps its own copy.
+
+A listing enters the pool when it ranks among its item's cheapest and leaves
+when it no longer does (or sells). The item's top of book and listing counts
+(`tops`) still describe the whole market, not only the pool.
 
 ## Access
 
@@ -3566,9 +3573,9 @@ epoch ms.
 
 | Field | Channel | Element |
 |---|---|---|
-| `adds` | `listings` | `[id, itemId, phase, price, instant, detail, name]` — a listing entered the book. `detail` follows your level. `name` is the item's market name, so an item that first appears after your export still has one. |
+| `adds` | `listings` | `[id, itemId, phase, price, instant, detail, name]` — a listing entered the pool. `detail` follows your level. `name` is the item's market name, so an item that first appears after your export still has one. |
 | `prices` | `listings` | `[id, itemId, price, instant]` — the listing's price or delivery moved |
-| `removes` | `listings` | `[id, itemId]` — the listing left the book |
+| `removes` | `listings` | `[id, itemId]` — the listing left the pool: it sold, or it no longer ranks among the item's cheapest |
 | `tops` | `prices` | `[itemId, phase, best \| null, bestInstant \| null, listings, instantListings]` — the item's cheapest price, cheapest instant price, and listing counts |
 
 Within an epoch, `seq` increases by exactly 1 per frame, and a second with
@@ -3698,6 +3705,81 @@ Buy any listing in your copy by passing its `id` to `POST /market/buy`. A
 listing can still sell between your last frame and the purchase; see
 [Live market](/guides/live-market#buying-a-listing-that-just-sold) for how
 `POST /market/buy` handles that.
+
+## Redis
+
+The same pool, held in a Redis you log in to with a read-only account of
+your own. `GET /market/pool` returns the login:
+
+```json
+{
+  "url": "rediss://m_0190f4c2-…:Q2x…@pool.skinshark.gg:6390",
+  "host": "pool.skinshark.gg",
+  "port": 6390,
+  "tls": true,
+  "username": "m_0190f4c2-…",
+  "password": "Q2x…",
+  "level": "full",
+  "depth": 100,
+  "instantMin": 30,
+  "keys": {
+    "items": "pool:items",
+    "rows": "pool:rows:full:",
+    "prices": "pool:l:7Hq2…:p:",
+    "stream": "pool:stream",
+    "state": "pool:state",
+    "meta": "pool:l:7Hq2…:meta"
+  }
+}
+```
+
+Connect with `url` as is. The password is yours alone and reads only the
+keys below; anything else answers `NOPERM`, including `SCAN`, `KEYS` and
+every write. The URL stays the same between calls. Rotate the password from
+the dashboard; the old one stops working at once. A fee or level change on
+your account moves you to another `prices` prefix, so call
+`GET /market/pool` again after `NOPERM`.
+
+Your client must not run the `INFO`-based ready check (in ioredis,
+`enableReadyCheck: false`).
+
+| Key | Type | Holds |
+|---|---|---|
+| `items` | hash | item key → item JSON: `itemId`, `phase`, `name`, `marketHashName`, `type`, `iconUrl`, `exterior`, `rarity`, `color` |
+| `rows` + item key | hash | listing id → listing JSON at your level: `id`, `delivery` (`instant` or `standard`), then `wear`, `paintSeed`; `paintIndex`, `stickers` (`[{ name }]`); `assetId`, `previewToken`, `revertRefundPercent` |
+| `prices` + item key | hash | listing id → your price, a USD decimal string with your fee included (`"12.34"`) |
+| `meta` | hash | `ready` is `1` once your prices are complete |
+| `stream` | stream | one entry per change: `type` (`item.add`, `price.update`, `item.remove`) and `data`, a JSON `{ id, itemKey }` |
+| `state` | hash | `t` (last write, Unix ms), `frozen` (`1` while a source is briefly out), `depth`, `instantMin`, `gen` |
+
+An item key is the `itemId`, or `itemId:phase` for a Doppler phase with
+spaces as underscores (`a3f09c1d5e7b2468:Phase_2`).
+
+<Steps>
+  <Step title="Wait for ready">
+    Poll `meta` until `ready` is `1`. A new login, or a fee or level change,
+    takes a minute or two to fill.
+  </Step>
+  <Step title="Load">
+    Note the stream's last id (`XREVRANGE stream + - COUNT 1`), read
+    `items`, then for each item key `HGETALL` its `rows` and `prices`.
+  </Step>
+  <Step title="Follow">
+    `XREAD BLOCK` from the noted id. For `item.add`, read the listing's row
+    and price again; for `price.update`, its price; for `item.remove`, drop
+    it. Keep only the last entry per listing in a batch. A row or price that
+    is already gone when you read it is about to be removed.
+  </Step>
+  <Step title="Reload when told">
+    Load again when `gen` in `state` changes, or when the stream was trimmed
+    past your position (`XINFO STREAM` `max-deleted-entry-id` above your
+    last id).
+  </Step>
+</Steps>
+
+Every hash write lands before its stream entry, so a read after an entry
+sees that change or a newer one. `@skinshark/sdk`
+does all of this in `sdk.market.syncPool()`.
 
 
 # Data models
@@ -4690,6 +4772,7 @@ Self-hosted crypto deposit/withdrawal/transfer (EVM, Tron, Solana).
 | 2002 | `WORKER_LOW_BALANCE` | 503 | Marketplace worker has insufficient balance to settle. |
 | 2005 | `MARKET_DATA_NOT_ENABLED` | 403 | The [market export](/guides/market-export) is not enabled for this merchant. |
 | 2006 | `EXPORT_NOT_READY` | 503 | The market export build for your price tier is not there yet (for example, just after a new epoch). Retry shortly. |
+| 2008 | `POOL_NOT_READY` | 503 | Redis access to the market pool is not available yet. Retry later. |
 | 2010 | `ORDER_NOT_FOUND` | 404 | Trade ID or external ID doesn't exist in your scope. |
 | 2011 | `LISTING_NOT_FOUND` | 404 | Listing sold / removed since you fetched it. |
 | 2012 | `LISTING_DETAIL_FAILED` | 502 | Failed to fetch listing details from upstream. |
@@ -5371,15 +5454,17 @@ page through it; `limit=-1` returns the whole feed in one response.
 market-data entitlement, enabled per merchant by SkinShark.
 
 Returns signed links to the latest build of the market export: the
-full-depth, deduplicated book of every buyable listing, one listing per
-physical item, priced for your account (prices already include your
-fee). Each listing `id` can be passed straight to `/market/buy`.
+pool of the deduplicated book, the 100 cheapest buyable listings of
+every item and Doppler phase (at least 30 of them instant when the
+item has that many), one listing per physical item, priced for your
+account (prices already include your fee). Each listing `id` can be
+passed straight to `/market/buy`.
 
 A build is 16 gzipped NDJSON `files`, split by item, with a whole listing
 on every line. Download them in parallel, check each file's `sha256`
 (hex of the gzipped bytes) and `rows`, then gunzip. The links expire at
 `expiresAt`, about 10 minutes after the call. A new build lands about
-every 20 minutes.
+every 10 minutes.
 
 - Each line is a listing as a JSON object: `id`, `itemId`, `name`,
   `phase`, `price` (a decimal string in USD, `"12.34"`) and `instant`
@@ -5388,12 +5473,27 @@ every 20 minutes.
   `paintIndex`, `stickers`. `full` adds `assetId`, `inspect`,
   `revertRefundPercent`.
 
-The build is the whole book as of (`epoch`, `seq`). Keep it current by
+The build is the whole pool as of (`epoch`, `seq`). Keep it current by
 subscribing to `wss://stream.skinshark.gg/market/stream` with
 `epoch` and `since: seq`.
 
 The response carries an `ETag`. Send it back as `If-None-Match` to get
 `304 Not Modified` with no body while the build is unchanged.
+
+### GET /market/pool
+
+**Market pool Redis login**
+
+**Auth context:** merchant only. `On-Behalf-Of` rejected. Requires the
+market-data entitlement, enabled per merchant by SkinShark.
+
+Returns a read-only login to the pool Redis: the same 100 cheapest
+listings per item and phase as the export, priced for your account.
+Connect with `url` as is (TLS when `tls`, with no `INFO`-based ready
+check). The login reads only the keys in `keys`; anything else answers
+`NOPERM`. The URL is the same on every call until you rotate the
+password from the dashboard. Call again after `NOPERM`: a fee or level
+change moves your prices to another key prefix.
 
 ### POST /market/buy
 
