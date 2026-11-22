@@ -15,6 +15,7 @@ const PAGES = [
   'guides/error-handling.mdx',
   'integration/core-api.mdx',
   'integration/full-platform.mdx',
+  'guides/custom-search.mdx',
   'integration/partner-crypto-payout.mdx',
   'guides/sdk.mdx',
   'guides/webhooks.mdx',

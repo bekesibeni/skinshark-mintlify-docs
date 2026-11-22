@@ -1,0 +1,100 @@
+---
+title: "Custom search order"
+description: "Order the catalog your own way with POST /market/search: weights, pinned items and filters in one JSON body."
+---
+
+`GET /market/search` gives you a fixed set of sorts. `POST /market/search` lets you write the
+order yourself, per request. Nothing is stored on our side, so you can keep as many orders as you
+like, change them without us, and serve a different one to each user.
+
+Entries, prices and paging are the same as on the GET.
+
+```http
+POST /market/search
+On-Behalf-Of: <sub-user>
+Content-Type: application/json
+
+{
+  "weights": { "liquidity": 0.4, "price": 0.6 },
+  "pinned": ["7191cc0324277b0d"],
+  "filters": { "min_price": 50, "category": ["Knives", "Gloves"] },
+  "page": 1,
+  "limit": 50
+}
+```
+
+Every key is optional. Unknown keys are rejected with `422`.
+
+## Examples
+
+| Order | Body |
+|---|---|
+| Our default grid | `{}` |
+| Highest to lowest price | `{"weights":{"price":1}}` |
+| Lowest to highest price | `{"weights":{"price":-1}}` |
+| Liquid and expensive, from $50 | `{"weights":{"liquidity":0.4,"price":0.6},"filters":{"min_price":50}}` |
+| Our default grid with two items on top | `{"pinned":["<itemId>","<itemId>"]}` |
+
+## Weights
+
+Each field becomes a number from 0 to 1: among the matching entries that have the field, the share
+this entry is level with or above. That number is multiplied by the field's weight, the results are
+added up, and the highest total comes first. Every field is on the same 0 to 1 scale, so weights
+compare directly: `0.6` counts one and a half times as much as `0.4`.
+
+| Field | Higher means |
+|---|---|
+| `price` | a higher cheapest price |
+| `liquidity` | more sales over the last 30 days |
+| `popularity` | a better place among the best sellers |
+| `discount` | a price further under a reference market's lowest ask |
+| `listings` | more listings on sale |
+
+- Weights run from -10 to 10. A negative weight prefers low values.
+- An entry with no data for a field scores 0 on it.
+- At least one weight must not be 0. With a single weight the result is a plain sort on that field.
+- Equal totals go by name.
+- Without `weights` you get our default order, or relevance when `q` is set.
+
+Entries with nothing to buy always come last.
+
+## Pinned items
+
+Up to 100 item ids (`id` on a search entry), shown first in the order you send them. All phases of a
+pinned item stay together. A pin still has to match the filters, and one with nothing to buy is not
+moved up.
+
+## Filters
+
+| Filter | Value |
+|---|---|
+| `weapon`, `rarity`, `wear`, `category`, `item_type`, `collection` | one value, or a list of up to 50 that matches any of them |
+| `tags` | a list of `Normal`, `StatTrak`, `Souvenir` |
+| `phase` | one Doppler phase |
+| `paint_index` | integer |
+| `min_price`, `max_price` | dollars, the price your user pays |
+| `min_listings` | integer, 1 or more |
+
+`q` sits beside `filters` and narrows the result to a search text.
+
+<Tip>
+Use a list instead of one search per weapon. Merging separate searches on your side cannot keep a
+weighted order, because the totals only compare within one request.
+</Tip>
+
+## Caching on your side
+
+The order is the whole body, so put the body in your cache key. Prices, and which entries a price
+filter keeps, follow the user's own fees, so keep the user in the key as you do for the GET.
+
+## With the SDK
+
+```ts
+const page = await sdk.market.customSearch(
+  { weights: { liquidity: 0.4, price: 0.6 }, filters: { min_price: 50 } },
+  { onBehalfOf: subUserId },
+);
+```
+
+Versions without `customSearch` can call
+`sdk.raw.post('market/search', body, { onBehalfOf: subUserId })`.

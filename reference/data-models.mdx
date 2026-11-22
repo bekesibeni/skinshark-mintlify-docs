@@ -483,6 +483,33 @@ interface SearchResultItem {
   steamPrice?: number;
 }
 
+// POST /market/search
+interface CustomSearchBody {
+  q?: string;
+  // -10 to 10 each, at least one not 0. Negative prefers low values.
+  weights?: Partial<Record<"price" | "liquidity" | "popularity" | "discount" | "listings", number>>;
+  pinned?: string[];           // item ids, up to 100
+  filters?: CustomSearchFilters;
+  page?: number;
+  limit?: number;
+}
+
+// Lists match any of their values, up to 50.
+interface CustomSearchFilters {
+  weapon?: string | string[];
+  rarity?: string | string[];
+  wear?: string | string[];
+  category?: string | string[];
+  item_type?: string | string[];
+  collection?: string | string[];
+  tags?: ("Normal" | "StatTrak" | "Souvenir")[];
+  paint_index?: number;
+  phase?: DopplerPhase;
+  min_price?: number;
+  max_price?: number;
+  min_listings?: number;
+}
+
 interface SearchResponse {
   items: SearchResultItem[];
   total: number;

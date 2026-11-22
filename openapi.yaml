@@ -946,6 +946,79 @@ components:
         listingsCount: { type: number }
         steamPrice: { type: number }
 
+    StringOrList:
+      description: One value, or a list that matches any of them.
+      oneOf:
+        - { type: string, maxLength: 50 }
+        - { type: array, minItems: 1, maxItems: 50, items: { type: string, maxLength: 50 } }
+
+    SearchCategory:
+      type: string
+      enum: [Pistols, Rifles, Heavy, SMGs, Knives, Gloves, Equipment, Grenades, C4]
+
+    CustomSearchFilters:
+      type: object
+      additionalProperties: false
+      properties:
+        weapon: { $ref: '#/components/schemas/StringOrList' }
+        rarity: { $ref: '#/components/schemas/StringOrList' }
+        wear: { $ref: '#/components/schemas/StringOrList' }
+        category:
+          description: One value, or a list that matches any of them.
+          oneOf:
+            - { $ref: '#/components/schemas/SearchCategory' }
+            - { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/SearchCategory' } }
+        item_type: { $ref: '#/components/schemas/StringOrList' }
+        collection:
+          description: One value, or a list that matches any of them.
+          oneOf:
+            - { type: string, maxLength: 200 }
+            - { type: array, minItems: 1, maxItems: 50, items: { type: string, maxLength: 200 } }
+        tags:
+          type: array
+          minItems: 1
+          maxItems: 3
+          description: '`Normal` means no StatTrak/Souvenir tag.'
+          items: { type: string, enum: [Normal, StatTrak, Souvenir] }
+        paint_index: { type: integer }
+        phase:
+          type: string
+          enum: [Phase 1, Phase 2, Phase 3, Phase 4, Ruby, Sapphire, Black Pearl, Emerald]
+          description: Narrow to one Doppler phase. Implies phased items only.
+        min_price: { type: number, minimum: 0, description: 'Dollars, the price the user pays.' }
+        max_price: { type: number, minimum: 0, description: 'Dollars, the price the user pays.' }
+        min_listings: { type: integer, minimum: 1 }
+
+    CustomSearchBody:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 100 }
+        weights:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          description: |
+            The order. Each field becomes a number from 0 to 1 (among the matching entries that
+            have it, the share this entry is level with or above), times its weight, summed,
+            highest first. A negative weight prefers low values and an entry with no data
+            scores 0. At least one weight must not be 0. Without `weights` the order is the
+            default one, or relevance with `q`.
+          properties:
+            price: { type: number, minimum: -10, maximum: 10, description: 'Cheapest price.' }
+            liquidity: { type: number, minimum: -10, maximum: 10, description: 'Sales over the last 30 days.' }
+            popularity: { type: number, minimum: -10, maximum: 10, description: 'Place among the best sellers.' }
+            discount: { type: number, minimum: -10, maximum: 10, description: 'How far the price sits under a reference market''s lowest ask.' }
+            listings: { type: number, minimum: -10, maximum: 10, description: 'Listings on sale.' }
+        pinned:
+          type: array
+          maxItems: 100
+          description: Item ids shown first, in this order. A pin still has to match the filters.
+          items: { type: string, minLength: 1, maxLength: 64 }
+        filters: { $ref: '#/components/schemas/CustomSearchFilters' }
+        page: { type: integer, minimum: 1, default: 1 }
+        limit: { type: integer, minimum: 1, maximum: 100, default: 50 }
+
     SearchResponse:
       type: object
       required: [items, total, page, limit, totalPages]
@@ -3016,6 +3089,46 @@ paths:
                       data: { $ref: '#/components/schemas/SearchResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+    post:
+      operationId: customSearchMarket
+      tags: [Market]
+      summary: Search items in your own order
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 120/min.**
+
+        The same entries, prices and paging as `GET /market/search`, ordered by the
+        weights and pinned items in the body. Nothing is stored. An empty body returns
+        the default order. Entries with nothing to buy always come last.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomSearchBody' }
+            examples:
+              highestToLowest:
+                summary: Highest to lowest price
+                value: { weights: { price: 1 } }
+              liquidAndExpensive:
+                summary: Liquid and expensive, from $50
+                value: { weights: { liquidity: 0.4, price: 0.6 }, filters: { min_price: 50 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SearchResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
   /market/prices:
